@@ -31,6 +31,7 @@ pub struct App {
     pub editing: Option<EditingField>,
     pub response: Option<Result<http::Response, String>>,
     pub loading: bool,
+    pub tick: usize,
     // KV editor state
     pub kv_row: usize,
     pub kv_on_key: bool,
@@ -46,6 +47,7 @@ impl App {
             editing: None,
             response: None,
             loading: false,
+            tick: 0,
             kv_row: 0,
             kv_on_key: true,
         }

@@ -28,8 +28,10 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(block, area);
 
     if app.loading {
+        let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let spinner = frames[(app.tick / 4) % frames.len()];
         let loading = Paragraph::new(Span::styled(
-            "⏳ Sending request...",
+            format!(" {} Sending request...", spinner),
             Style::default().fg(Color::Yellow),
         ));
         frame.render_widget(loading, inner);
@@ -37,11 +39,6 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let Some(ref result) = app.response else {
-        let hint = Paragraph::new(Span::styled(
-            "Press Ctrl+Enter to send",
-            Style::default().fg(Color::DarkGray),
-        ));
-        frame.render_widget(hint, inner);
         return;
     };
 

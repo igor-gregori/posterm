@@ -32,6 +32,8 @@ async fn main() -> io::Result<()> {
 
         terminal.draw(|frame| ui::draw(frame, &app))?;
 
+        app.tick = app.tick.wrapping_add(1);
+
         // Check for completed responses
         if let Ok(result) = rx.try_recv() {
             app.loading = false;

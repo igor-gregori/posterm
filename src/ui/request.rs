@@ -52,22 +52,22 @@ fn draw_method_url(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(method, chunks[0]);
 
     let editing_url = app.editing == Some(EditingField::Url);
-    let url_text = if app.request.url.is_empty() && !editing_url {
-        "https://...".to_string()
-    } else if editing_url {
-        format!("{}▌", app.request.url)
+    if editing_url {
+        let url_line = Line::from(vec![
+            Span::styled(&app.request.url, Style::default().fg(Color::White)),
+            Span::styled("▌", Style::default().fg(Color::Cyan)),
+        ]);
+        let url = Paragraph::new(url_line);
+        frame.render_widget(url, chunks[1]);
     } else {
-        app.request.url.clone()
-    };
-    let url_style = if editing_url {
-        Style::default().fg(Color::White).bg(Color::DarkGray)
-    } else if app.request.url.is_empty() {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        Style::default().fg(Color::White)
-    };
-    let url = Paragraph::new(Span::styled(url_text, url_style));
-    frame.render_widget(url, chunks[1]);
+        let (url_text, url_style) = if app.request.url.is_empty() {
+            ("https://...".to_string(), Style::default().fg(Color::DarkGray))
+        } else {
+            (app.request.url.clone(), Style::default().fg(Color::White))
+        };
+        let url = Paragraph::new(Span::styled(url_text, url_style));
+        frame.render_widget(url, chunks[1]);
+    }
 }
 
 fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
