@@ -21,23 +21,21 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(chunks[1]);
 
+    // Sidebar
     let sidebar = Block::default()
         .title(" Collections ")
         .borders(Borders::ALL)
         .border_style(border_style(app, Panel::Sidebar));
+    frame.render_widget(sidebar, chunks[0]);
 
-    let request = Block::default()
-        .title(" Request ")
-        .borders(Borders::ALL)
-        .border_style(border_style(app, Panel::Request));
+    // Request panel (delegated)
+    request::draw(frame, app, right[0]);
 
+    // Response panel
     let response = Block::default()
         .title(" Response ")
         .borders(Borders::ALL)
         .border_style(border_style(app, Panel::Response));
-
-    frame.render_widget(sidebar, chunks[0]);
-    frame.render_widget(request, right[0]);
     frame.render_widget(response, right[1]);
 }
 

@@ -1,3 +1,5 @@
+use crate::http::models::RequestModel;
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum Panel {
     Sidebar,
@@ -5,9 +7,40 @@ pub enum Panel {
     Response,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum RequestTab {
+    Headers,
+    Body,
+    Params,
+}
+
+impl RequestTab {
+    pub fn next(&self) -> Self {
+        match self {
+            RequestTab::Headers => RequestTab::Body,
+            RequestTab::Body => RequestTab::Params,
+            RequestTab::Params => RequestTab::Headers,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum RequestFocus {
+    Method,
+    Url,
+    Tab,
+}
+
 pub struct App {
     pub running: bool,
     pub active_panel: Panel,
+    pub request: RequestModel,
+    pub request_tab: RequestTab,
+    pub request_focus: RequestFocus,
+    pub editing: bool,
+    // For key-value editors: which row and whether editing key(true) or value(false)
+    pub kv_row: usize,
+    pub kv_on_key: bool,
 }
 
 impl App {
@@ -15,6 +48,12 @@ impl App {
         Self {
             running: true,
             active_panel: Panel::Sidebar,
+            request: RequestModel::new(),
+            request_tab: RequestTab::Headers,
+            request_focus: RequestFocus::Url,
+            editing: false,
+            kv_row: 0,
+            kv_on_key: true,
         }
     }
 
