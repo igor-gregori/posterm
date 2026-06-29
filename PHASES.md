@@ -1,44 +1,45 @@
 # Fases de Implementação
 
-## Fase 1 — Shell TUI (fundação)
+## Fase 1 — Shell TUI (fundação) ✅
 
 **Objetivo:** App roda no terminal, exibe layout, responde a teclas.
 
-- [ ] Setup do terminal (alternate screen, raw mode)
-- [ ] Event loop com crossterm (teclas, resize)
-- [ ] Layout base com ratatui (3 painéis: sidebar, request, response)
-- [ ] Navegação entre painéis com Tab
-- [ ] Quit com `q` / `Ctrl+C`
+- [x] Setup do terminal (alternate screen, raw mode)
+- [x] Event loop com crossterm (teclas, resize)
+- [x] Layout base com ratatui (3 painéis: sidebar, request, response)
+- [x] Navegação entre painéis com Tab
+- [x] Quit com `q` / `Ctrl+C`
 
 **Entrega:** App abre, mostra layout vazio, navega entre painéis e fecha.
 
 ---
 
-## Fase 2 — Request Builder
+## Fase 2 — Request Builder ✅
 
 **Objetivo:** Usuário monta uma request completa pela TUI.
 
-- [ ] Seletor de método HTTP (GET/POST/PUT/DELETE/PATCH)
-- [ ] Campo de input para URL
-- [ ] Editor de headers (key: value, adicionar/remover)
-- [ ] Editor de body (textarea com scroll)
-- [ ] Editor de query params
+- [x] Seletor de método HTTP (GET/POST/PUT/DELETE/PATCH) — `Ctrl+M`
+- [x] Campo de input para URL — `Ctrl+U`
+- [x] Editor de headers (key: value, adicionar/remover) — `Ctrl+H`
+- [x] Editor de body (textarea) — `Ctrl+B`
+- [x] Editor de query params — `Ctrl+P`
+- [x] Footer global com keybindings contextuais
 
-**Entrega:** Usuário preenche todos os campos de uma request.
+**Entrega:** Usuário preenche todos os campos de uma request via atalhos diretos.
 
 ---
 
-## Fase 3 — HTTP Client
+## Fase 3 — HTTP Client ✅
 
 **Objetivo:** Enviar requests e exibir responses.
 
-- [ ] Integração com reqwest (async via tokio)
-- [ ] Envio com `Ctrl+Enter`
-- [ ] Exibição de status code + tempo de resposta
-- [ ] Exibição de response headers
-- [ ] Exibição de response body
-- [ ] Syntax highlighting do body (JSON/XML) com syntect
-- [ ] Indicador de loading durante request
+- [x] Integração com reqwest (async via tokio)
+- [x] Envio com `Ctrl+Enter`
+- [x] Exibição de status code + tempo de resposta
+- [x] Exibição de response headers
+- [x] Exibição de response body
+- [x] Syntax highlighting do body (JSON/XML) com syntect
+- [x] Indicador de loading durante request
 
 **Entrega:** Request completa ida e volta, com resposta formatada.
 
@@ -90,6 +91,7 @@
 
 **Objetivo:** UX refinada e features de qualidade de vida.
 
+- [ ] Menu de configurações (keybindings customizáveis)
 - [ ] Temas de cores (pelo menos dark/light)
 - [ ] Resize responsivo
 - [ ] Copy response body para clipboard

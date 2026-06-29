@@ -1,7 +1,7 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::mpsc;
 
-use crate::app::{App, Panel, RequestFocus, RequestTab};
+use crate::app::{App, EditingField, RequestTab};
 use crate::http;
 
 pub fn handle_events(
@@ -10,7 +10,7 @@ pub fn handle_events(
 ) -> std::io::Result<()> {
     if event::poll(std::time::Duration::from_millis(16))? {
         if let Event::Key(key) = event::read()? {
-            if app.editing {
+            if app.editing.is_some() {
                 handle_editing(app, key);
             } else {
                 handle_normal(app, key, tx);
@@ -22,11 +22,13 @@ pub fn handle_events(
 
 fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<Result<http::Response, String>>) {
     match (key.modifiers, key.code) {
+        // Global
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.running = false,
-        (KeyModifiers::NONE, KeyCode::Char('q')) if !app.editing => app.running = false,
+        (KeyModifiers::NONE, KeyCode::Char('q')) => app.running = false,
         (KeyModifiers::NONE, KeyCode::Tab) => app.next_panel(),
-        // Send request with Ctrl+Enter
-        (KeyModifiers::CONTROL, KeyCode::Enter) => {
+
+        // Send request: Ctrl+R
+        (KeyModifiers::CONTROL, KeyCode::Char('r')) => {
             if !app.loading && !app.request.url.is_empty() {
                 app.loading = true;
                 let request = app.request.clone();
@@ -37,150 +39,98 @@ fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<Result<http::Re
                 });
             }
         }
-        _ => {}
-    }
 
-    if app.active_panel != Panel::Request {
-        return;
-    }
-
-    match key.code {
-        KeyCode::Up => match app.request_focus {
-            RequestFocus::Tab => app.request_focus = RequestFocus::Url,
-            RequestFocus::Url => app.request_focus = RequestFocus::Method,
-            _ => {}
-        },
-        KeyCode::Down => match app.request_focus {
-            RequestFocus::Method => app.request_focus = RequestFocus::Url,
-            RequestFocus::Url => app.request_focus = RequestFocus::Tab,
-            _ => {}
-        },
-        KeyCode::Left if app.request_focus == RequestFocus::Method => {
-            app.request.method = app.request.method.prev();
-        }
-        KeyCode::Right if app.request_focus == RequestFocus::Method => {
+        // Cycle method: Ctrl+T
+        (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
             app.request.method = app.request.method.next();
         }
-        KeyCode::Left if app.request_focus == RequestFocus::Tab => {
-            app.request_tab = match app.request_tab {
-                RequestTab::Headers => RequestTab::Params,
-                RequestTab::Body => RequestTab::Headers,
-                RequestTab::Params => RequestTab::Body,
-            };
+
+        // Request editing shortcuts
+        (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+            app.editing = Some(EditingField::Url);
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('h')) => {
+            app.request_tab = RequestTab::Headers;
             app.kv_row = 0;
+            app.kv_on_key = true;
+            app.editing = Some(EditingField::Headers);
         }
-        KeyCode::Right if app.request_focus == RequestFocus::Tab => {
-            app.request_tab = app.request_tab.next();
+        (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
+            app.request_tab = RequestTab::Body;
+            app.editing = Some(EditingField::Body);
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
+            app.request_tab = RequestTab::Params;
             app.kv_row = 0;
-        }
-        KeyCode::Enter => {
-            app.editing = true;
-        }
-        KeyCode::Char('j') if app.request_focus == RequestFocus::Tab => {
-            let len = kv_len(app);
-            if len > 0 && app.kv_row < len - 1 {
-                app.kv_row += 1;
-            }
-        }
-        KeyCode::Char('k') if app.request_focus == RequestFocus::Tab => {
-            if app.kv_row > 0 {
-                app.kv_row -= 1;
-            }
-        }
-        KeyCode::Char('l')
-            if app.request_focus == RequestFocus::Tab && app.request_tab != RequestTab::Body =>
-        {
-            app.kv_on_key = false;
-        }
-        KeyCode::Char('h')
-            if app.request_focus == RequestFocus::Tab && app.request_tab != RequestTab::Body =>
-        {
             app.kv_on_key = true;
+            app.editing = Some(EditingField::Params);
         }
-        KeyCode::Char('a')
-            if app.request_focus == RequestFocus::Tab && app.request_tab != RequestTab::Body =>
-        {
-            let kv = crate::http::models::KeyValue {
-                key: String::new(),
-                value: String::new(),
-            };
-            match app.request_tab {
-                RequestTab::Headers => app.request.headers.push(kv),
-                RequestTab::Params => app.request.params.push(kv),
-                _ => {}
-            }
-            let len = kv_len(app);
-            app.kv_row = len - 1;
-            app.kv_on_key = true;
-            app.editing = true;
-        }
-        KeyCode::Char('d')
-            if app.request_focus == RequestFocus::Tab && app.request_tab != RequestTab::Body =>
-        {
-            let len = kv_len(app);
-            if len > 1 {
-                match app.request_tab {
-                    RequestTab::Headers => {
-                        app.request.headers.remove(app.kv_row);
-                    }
-                    RequestTab::Params => {
-                        app.request.params.remove(app.kv_row);
-                    }
-                    _ => {}
-                }
-                if app.kv_row >= kv_len(app) {
-                    app.kv_row = kv_len(app).saturating_sub(1);
-                }
-            }
-        }
+
         _ => {}
     }
 }
 
 fn handle_editing(app: &mut App, key: KeyEvent) {
+    let field = app.editing.unwrap();
+
+    match field {
+        EditingField::Url => handle_text_edit(app, key, &mut |a| &mut a.request.url),
+        EditingField::Body => handle_text_edit(app, key, &mut |a| &mut a.request.body),
+        EditingField::Headers => handle_kv_edit(app, key, true),
+        EditingField::Params => handle_kv_edit(app, key, false),
+    }
+}
+
+fn handle_text_edit(app: &mut App, key: KeyEvent, get_field: &mut dyn FnMut(&mut App) -> &mut String) {
     match key.code {
-        KeyCode::Esc => app.editing = false,
-        KeyCode::Enter => app.editing = false,
-        KeyCode::Backspace => {
-            get_editing_field(app).pop();
-        }
-        KeyCode::Char(c) => {
-            get_editing_field(app).push(c);
-        }
+        KeyCode::Esc | KeyCode::Enter => app.editing = None,
+        KeyCode::Backspace => { get_field(app).pop(); }
+        KeyCode::Char(c) => get_field(app).push(c),
         _ => {}
     }
 }
 
-fn get_editing_field(app: &mut App) -> &mut String {
-    match app.request_focus {
-        RequestFocus::Url => &mut app.request.url,
-        RequestFocus::Tab => match app.request_tab {
-            RequestTab::Body => &mut app.request.body,
-            RequestTab::Headers => {
-                let row = app.kv_row;
-                if app.kv_on_key {
-                    &mut app.request.headers[row].key
-                } else {
-                    &mut app.request.headers[row].value
-                }
-            }
-            RequestTab::Params => {
-                let row = app.kv_row;
-                if app.kv_on_key {
-                    &mut app.request.params[row].key
-                } else {
-                    &mut app.request.params[row].value
-                }
-            }
-        },
-        RequestFocus::Method => &mut app.request.url,
-    }
-}
+fn handle_kv_edit(app: &mut App, key: KeyEvent, is_headers: bool) {
+    let items = if is_headers { &app.request.headers } else { &app.request.params };
+    let len = items.len();
 
-fn kv_len(app: &App) -> usize {
-    match app.request_tab {
-        RequestTab::Headers => app.request.headers.len(),
-        RequestTab::Params => app.request.params.len(),
-        RequestTab::Body => 0,
+    match key.code {
+        KeyCode::Esc => app.editing = None,
+        KeyCode::Tab => app.kv_on_key = !app.kv_on_key,
+        KeyCode::Down | KeyCode::Enter if app.kv_row < len.saturating_sub(1) => {
+            app.kv_row += 1;
+            app.kv_on_key = true;
+        }
+        KeyCode::Up if app.kv_row > 0 => {
+            app.kv_row -= 1;
+            app.kv_on_key = true;
+        }
+        KeyCode::Backspace => {
+            let items = if is_headers { &mut app.request.headers } else { &mut app.request.params };
+            if app.kv_on_key {
+                items[app.kv_row].key.pop();
+            } else {
+                items[app.kv_row].value.pop();
+            }
+        }
+        KeyCode::Char(c) => {
+            let items = if is_headers { &mut app.request.headers } else { &mut app.request.params };
+            if app.kv_on_key {
+                items[app.kv_row].key.push(c);
+            } else {
+                items[app.kv_row].value.push(c);
+            }
+        }
+        // Add new row with Ctrl+A
+        KeyCode::Enter if app.kv_row == len.saturating_sub(1) => {
+            let items = if is_headers { &mut app.request.headers } else { &mut app.request.params };
+            items.push(crate::http::models::KeyValue {
+                key: String::new(),
+                value: String::new(),
+            });
+            app.kv_row = items.len() - 1;
+            app.kv_on_key = true;
+        }
+        _ => {}
     }
 }

@@ -15,21 +15,12 @@ pub enum RequestTab {
     Params,
 }
 
-impl RequestTab {
-    pub fn next(&self) -> Self {
-        match self {
-            RequestTab::Headers => RequestTab::Body,
-            RequestTab::Body => RequestTab::Params,
-            RequestTab::Params => RequestTab::Headers,
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq)]
-pub enum RequestFocus {
-    Method,
+pub enum EditingField {
     Url,
-    Tab,
+    Headers,
+    Body,
+    Params,
 }
 
 pub struct App {
@@ -37,27 +28,26 @@ pub struct App {
     pub active_panel: Panel,
     pub request: RequestModel,
     pub request_tab: RequestTab,
-    pub request_focus: RequestFocus,
-    pub editing: bool,
-    pub kv_row: usize,
-    pub kv_on_key: bool,
+    pub editing: Option<EditingField>,
     pub response: Option<Result<http::Response, String>>,
     pub loading: bool,
+    // KV editor state
+    pub kv_row: usize,
+    pub kv_on_key: bool,
 }
 
 impl App {
     pub fn new() -> Self {
         Self {
             running: true,
-            active_panel: Panel::Sidebar,
+            active_panel: Panel::Request,
             request: RequestModel::new(),
             request_tab: RequestTab::Headers,
-            request_focus: RequestFocus::Url,
-            editing: false,
-            kv_row: 0,
-            kv_on_key: true,
+            editing: None,
             response: None,
             loading: false,
+            kv_row: 0,
+            kv_on_key: true,
         }
     }
 

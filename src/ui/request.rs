@@ -6,8 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, Panel, RequestFocus, RequestTab};
-use crate::http::models::KeyValue;
+use crate::app::{App, EditingField, Panel, RequestTab};
 
 pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let is_active = app.active_panel == Panel::Request;
@@ -45,26 +44,27 @@ fn draw_method_url(frame: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Length(method_width), Constraint::Min(1)])
         .split(area);
 
-    let method_style = if app.request_focus == RequestFocus::Method && app.active_panel == Panel::Request {
-        Style::default().fg(Color::Black).bg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-    };
+    let method_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
     let method = Paragraph::new(Span::styled(
         format!(" {} ", app.request.method.as_str()),
         method_style,
     ));
     frame.render_widget(method, chunks[0]);
 
-    let url_style = if app.request_focus == RequestFocus::Url && app.active_panel == Panel::Request {
-        Style::default().fg(Color::White)
+    let editing_url = app.editing == Some(EditingField::Url);
+    let url_text = if app.request.url.is_empty() && !editing_url {
+        "https://...".to_string()
+    } else if editing_url {
+        format!("{}▌", app.request.url)
     } else {
-        Style::default().fg(Color::DarkGray)
+        app.request.url.clone()
     };
-    let url_text = if app.request.url.is_empty() {
-        "https://..."
+    let url_style = if editing_url {
+        Style::default().fg(Color::White).bg(Color::DarkGray)
+    } else if app.request.url.is_empty() {
+        Style::default().fg(Color::DarkGray)
     } else {
-        &app.request.url
+        Style::default().fg(Color::White)
     };
     let url = Paragraph::new(Span::styled(url_text, url_style));
     frame.render_widget(url, chunks[1]);
@@ -87,44 +87,69 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_tab_content(frame: &mut Frame, app: &App, area: Rect) {
     match app.request_tab {
-        RequestTab::Headers => draw_kv_editor(frame, app, area, &app.request.headers, "headers"),
+        RequestTab::Headers => draw_kv_editor(frame, app, area, &app.request.headers, EditingField::Headers),
         RequestTab::Body => draw_body(frame, app, area),
-        RequestTab::Params => draw_kv_editor(frame, app, area, &app.request.params, "params"),
+        RequestTab::Params => draw_kv_editor(frame, app, area, &app.request.params, EditingField::Params),
     }
 }
 
-fn draw_kv_editor(frame: &mut Frame, app: &App, area: Rect, items: &[KeyValue], _label: &str) {
-    let is_tab_focused = app.active_panel == Panel::Request && app.request_focus == RequestFocus::Tab;
+fn draw_kv_editor(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    items: &[crate::http::models::KeyValue],
+    field: EditingField,
+) {
+    let is_editing = app.editing == Some(field);
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, kv) in items.iter().enumerate() {
-        let is_selected = is_tab_focused && i == app.kv_row;
-        let key_style = if is_selected && app.kv_on_key {
-            Style::default().fg(Color::Black).bg(Color::Cyan)
+        let is_active_row = is_editing && i == app.kv_row;
+
+        let key_text = if kv.key.is_empty() && is_active_row && app.kv_on_key {
+            "▌".to_string()
+        } else if kv.key.is_empty() {
+            "key".to_string()
+        } else if is_active_row && app.kv_on_key {
+            format!("{}▌", kv.key)
+        } else {
+            kv.key.clone()
+        };
+
+        let val_text = if kv.value.is_empty() && is_active_row && !app.kv_on_key {
+            "▌".to_string()
+        } else if kv.value.is_empty() {
+            "value".to_string()
+        } else if is_active_row && !app.kv_on_key {
+            format!("{}▌", kv.value)
+        } else {
+            kv.value.clone()
+        };
+
+        let key_style = if is_active_row && app.kv_on_key {
+            Style::default().fg(Color::White).bg(Color::DarkGray)
+        } else if kv.key.is_empty() {
+            Style::default().fg(Color::DarkGray)
         } else {
             Style::default().fg(Color::Green)
         };
-        let val_style = if is_selected && !app.kv_on_key {
-            Style::default().fg(Color::Black).bg(Color::Cyan)
+
+        let val_style = if is_active_row && !app.kv_on_key {
+            Style::default().fg(Color::White).bg(Color::DarkGray)
+        } else if kv.value.is_empty() {
+            Style::default().fg(Color::DarkGray)
         } else {
             Style::default().fg(Color::White)
         };
 
-        let key_text = if kv.key.is_empty() { "key" } else { &kv.key };
-        let val_text = if kv.value.is_empty() { "value" } else { &kv.value };
+        let row_marker = if is_active_row { "› " } else { "  " };
 
         lines.push(Line::from(vec![
+            Span::styled(row_marker, Style::default().fg(Color::Cyan)),
             Span::styled(key_text, key_style),
-            Span::styled(": ", Style::default().fg(Color::DarkGray)),
+            Span::styled(" : ", Style::default().fg(Color::DarkGray)),
             Span::styled(val_text, val_style),
         ]));
-    }
-
-    if lines.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  (empty — press 'a' to add)",
-            Style::default().fg(Color::DarkGray),
-        )));
     }
 
     let paragraph = Paragraph::new(lines);
@@ -132,19 +157,23 @@ fn draw_kv_editor(frame: &mut Frame, app: &App, area: Rect, items: &[KeyValue], 
 }
 
 fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
-    let is_focused = app.active_panel == Panel::Request && app.request_focus == RequestFocus::Tab;
-    let style = if is_focused {
-        Style::default().fg(Color::White)
+    let is_editing = app.editing == Some(EditingField::Body);
+    let text = if app.request.body.is_empty() && !is_editing {
+        "{ ... }".to_string()
+    } else if is_editing {
+        format!("{}▌", app.request.body)
     } else {
+        app.request.body.clone()
+    };
+
+    let style = if is_editing {
+        Style::default().fg(Color::White).bg(Color::DarkGray)
+    } else if app.request.body.is_empty() {
         Style::default().fg(Color::DarkGray)
-    };
-
-    let text = if app.request.body.is_empty() {
-        "{ ... }"
     } else {
-        &app.request.body
+        Style::default().fg(Color::White)
     };
 
-    let paragraph = Paragraph::new(text).style(style);
+    let paragraph = Paragraph::new(Span::styled(text, style));
     frame.render_widget(paragraph, area);
 }
