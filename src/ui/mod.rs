@@ -28,15 +28,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .border_style(border_style(app, Panel::Sidebar));
     frame.render_widget(sidebar, chunks[0]);
 
-    // Request panel (delegated)
+    // Request panel
     request::draw(frame, app, right[0]);
 
     // Response panel
-    let response = Block::default()
-        .title(" Response ")
-        .borders(Borders::ALL)
-        .border_style(border_style(app, Panel::Response));
-    frame.render_widget(response, right[1]);
+    response::draw(frame, app, right[1]);
 }
 
 fn border_style(app: &App, panel: Panel) -> Style {

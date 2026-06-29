@@ -1,25 +1,42 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use tokio::sync::mpsc;
 
 use crate::app::{App, Panel, RequestFocus, RequestTab};
+use crate::http;
 
-pub fn handle_events(app: &mut App) -> std::io::Result<()> {
+pub fn handle_events(
+    app: &mut App,
+    tx: &mpsc::Sender<Result<http::Response, String>>,
+) -> std::io::Result<()> {
     if event::poll(std::time::Duration::from_millis(16))? {
         if let Event::Key(key) = event::read()? {
             if app.editing {
                 handle_editing(app, key);
             } else {
-                handle_normal(app, key);
+                handle_normal(app, key, tx);
             }
         }
     }
     Ok(())
 }
 
-fn handle_normal(app: &mut App, key: KeyEvent) {
+fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<Result<http::Response, String>>) {
     match (key.modifiers, key.code) {
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.running = false,
-        (KeyModifiers::NONE, KeyCode::Char('q')) => app.running = false,
+        (KeyModifiers::NONE, KeyCode::Char('q')) if !app.editing => app.running = false,
         (KeyModifiers::NONE, KeyCode::Tab) => app.next_panel(),
+        // Send request with Ctrl+Enter
+        (KeyModifiers::CONTROL, KeyCode::Enter) => {
+            if !app.loading && !app.request.url.is_empty() {
+                app.loading = true;
+                let request = app.request.clone();
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let result = http::send_request(&request).await;
+                    let _ = tx.send(result).await;
+                });
+            }
+        }
         _ => {}
     }
 
@@ -28,7 +45,6 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
     }
 
     match key.code {
-        // Navigate focus within request panel
         KeyCode::Up => match app.request_focus {
             RequestFocus::Tab => app.request_focus = RequestFocus::Url,
             RequestFocus::Url => app.request_focus = RequestFocus::Method,
@@ -39,14 +55,12 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             RequestFocus::Url => app.request_focus = RequestFocus::Tab,
             _ => {}
         },
-        // Method cycling
         KeyCode::Left if app.request_focus == RequestFocus::Method => {
             app.request.method = app.request.method.prev();
         }
         KeyCode::Right if app.request_focus == RequestFocus::Method => {
             app.request.method = app.request.method.next();
         }
-        // Tab switching with left/right when focused on tab area header
         KeyCode::Left if app.request_focus == RequestFocus::Tab => {
             app.request_tab = match app.request_tab {
                 RequestTab::Headers => RequestTab::Params,
@@ -59,11 +73,9 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             app.request_tab = app.request_tab.next();
             app.kv_row = 0;
         }
-        // Enter to start editing
         KeyCode::Enter => {
             app.editing = true;
         }
-        // KV navigation in tab content
         KeyCode::Char('j') if app.request_focus == RequestFocus::Tab => {
             let len = kv_len(app);
             if len > 0 && app.kv_row < len - 1 {
@@ -75,14 +87,19 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
                 app.kv_row -= 1;
             }
         }
-        KeyCode::Char('l') if app.request_focus == RequestFocus::Tab && app.request_tab != RequestTab::Body => {
+        KeyCode::Char('l')
+            if app.request_focus == RequestFocus::Tab && app.request_tab != RequestTab::Body =>
+        {
             app.kv_on_key = false;
         }
-        KeyCode::Char('h') if app.request_focus == RequestFocus::Tab && app.request_tab != RequestTab::Body => {
+        KeyCode::Char('h')
+            if app.request_focus == RequestFocus::Tab && app.request_tab != RequestTab::Body =>
+        {
             app.kv_on_key = true;
         }
-        // Add row
-        KeyCode::Char('a') if app.request_focus == RequestFocus::Tab && app.request_tab != RequestTab::Body => {
+        KeyCode::Char('a')
+            if app.request_focus == RequestFocus::Tab && app.request_tab != RequestTab::Body =>
+        {
             let kv = crate::http::models::KeyValue {
                 key: String::new(),
                 value: String::new(),
@@ -97,13 +114,18 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             app.kv_on_key = true;
             app.editing = true;
         }
-        // Delete row
-        KeyCode::Char('d') if app.request_focus == RequestFocus::Tab && app.request_tab != RequestTab::Body => {
+        KeyCode::Char('d')
+            if app.request_focus == RequestFocus::Tab && app.request_tab != RequestTab::Body =>
+        {
             let len = kv_len(app);
             if len > 1 {
                 match app.request_tab {
-                    RequestTab::Headers => { app.request.headers.remove(app.kv_row); }
-                    RequestTab::Params => { app.request.params.remove(app.kv_row); }
+                    RequestTab::Headers => {
+                        app.request.headers.remove(app.kv_row);
+                    }
+                    RequestTab::Params => {
+                        app.request.params.remove(app.kv_row);
+                    }
                     _ => {}
                 }
                 if app.kv_row >= kv_len(app) {
@@ -117,19 +139,13 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
 
 fn handle_editing(app: &mut App, key: KeyEvent) {
     match key.code {
-        KeyCode::Esc => {
-            app.editing = false;
-        }
+        KeyCode::Esc => app.editing = false,
+        KeyCode::Enter => app.editing = false,
         KeyCode::Backspace => {
-            let s = get_editing_field(app);
-            s.pop();
+            get_editing_field(app).pop();
         }
         KeyCode::Char(c) => {
-            let s = get_editing_field(app);
-            s.push(c);
-        }
-        KeyCode::Enter => {
-            app.editing = false;
+            get_editing_field(app).push(c);
         }
         _ => {}
     }
@@ -157,7 +173,7 @@ fn get_editing_field(app: &mut App) -> &mut String {
                 }
             }
         },
-        RequestFocus::Method => &mut app.request.url, // no-op target
+        RequestFocus::Method => &mut app.request.url,
     }
 }
 

@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Method {
     Get,
     Post,
@@ -47,12 +47,13 @@ impl Method {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct KeyValue {
     pub key: String,
     pub value: String,
 }
 
+#[derive(Clone)]
 pub struct RequestModel {
     pub method: Method,
     pub url: String,

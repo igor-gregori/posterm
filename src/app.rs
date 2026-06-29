@@ -1,3 +1,4 @@
+use crate::http;
 use crate::http::models::RequestModel;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -38,9 +39,10 @@ pub struct App {
     pub request_tab: RequestTab,
     pub request_focus: RequestFocus,
     pub editing: bool,
-    // For key-value editors: which row and whether editing key(true) or value(false)
     pub kv_row: usize,
     pub kv_on_key: bool,
+    pub response: Option<Result<http::Response, String>>,
+    pub loading: bool,
 }
 
 impl App {
@@ -54,6 +56,8 @@ impl App {
             editing: false,
             kv_row: 0,
             kv_on_key: true,
+            response: None,
+            loading: false,
         }
     }
 
