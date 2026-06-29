@@ -1,0 +1,16 @@
+[package]
+name = "posterm"
+version = "0.1.0"
+edition = "2021"
+description = "A fast and beautiful TUI REST client"
+license = "MIT"
+
+[dependencies]
+ratatui = "0.28"
+crossterm = "0.28"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+syntect = "5"
+dirs = "5"
