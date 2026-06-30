@@ -1,5 +1,6 @@
 use crate::http;
 use crate::http::models::RequestModel;
+use crate::storage::collections::{self, Collection};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Panel {
@@ -23,6 +24,12 @@ pub enum EditingField {
     Params,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum Dialog {
+    SaveRequest,
+    NewCollection,
+}
+
 pub struct App {
     pub running: bool,
     pub active_panel: Panel,
@@ -35,10 +42,19 @@ pub struct App {
     // KV editor state
     pub kv_row: usize,
     pub kv_on_key: bool,
+    // Collections
+    pub collections: Vec<Collection>,
+    pub sidebar_collection: usize,
+    pub sidebar_request: Option<usize>,
+    pub sidebar_expanded: Option<usize>,
+    // Dialog
+    pub dialog: Option<Dialog>,
+    pub dialog_input: String,
 }
 
 impl App {
     pub fn new() -> Self {
+        let collections = collections::load_collections();
         Self {
             running: true,
             active_panel: Panel::Request,
@@ -50,6 +66,12 @@ impl App {
             tick: 0,
             kv_row: 0,
             kv_on_key: true,
+            collections,
+            sidebar_collection: 0,
+            sidebar_request: None,
+            sidebar_expanded: None,
+            dialog: None,
+            dialog_input: String::new(),
         }
     }
 
@@ -59,5 +81,9 @@ impl App {
             Panel::Request => Panel::Response,
             Panel::Response => Panel::Sidebar,
         };
+    }
+
+    pub fn reload_collections(&mut self) {
+        self.collections = collections::load_collections();
     }
 }

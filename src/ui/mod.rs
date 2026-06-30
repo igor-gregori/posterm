@@ -1,15 +1,17 @@
+pub mod dialog;
 pub mod request;
 pub mod response;
+pub mod sidebar;
 
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
-use crate::app::{App, Panel};
+use crate::app::App;
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let main_layout = Layout::default()
@@ -28,11 +30,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .split(chunks[1]);
 
     // Sidebar
-    let sidebar = Block::default()
-        .title(" Collections ")
-        .borders(Borders::ALL)
-        .border_style(border_style(app, Panel::Sidebar));
-    frame.render_widget(sidebar, chunks[0]);
+    sidebar::draw(frame, app, chunks[0]);
 
     // Request panel
     request::draw(frame, app, right[0]);
@@ -42,10 +40,15 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     // Footer
     draw_footer(frame, app, main_layout[1]);
+
+    // Dialog overlay (on top of everything)
+    dialog::draw(frame, app);
 }
 
 fn draw_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let hints = if app.editing.is_some() {
+    let hints = if app.dialog.is_some() {
+        vec![("Esc", "Cancel"), ("Enter", "Confirm")]
+    } else if app.editing.is_some() {
         vec![
             ("Esc", "Cancel"),
             ("Enter", "Confirm"),
@@ -59,6 +62,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             ("Ctrl+H", "Headers"),
             ("Ctrl+B", "Body"),
             ("Ctrl+P", "Params"),
+            ("Ctrl+S", "Save"),
+            ("Ctrl+N", "New col."),
             ("Tab", "Panel"),
             ("q", "Quit"),
         ]
@@ -71,7 +76,10 @@ fn draw_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             let mut s = vec![
                 Span::styled(
                     format!(" {} ", key),
-                    Style::default().fg(Color::Black).bg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(format!(" {} ", desc), Style::default().fg(Color::DarkGray)),
             ];
@@ -84,12 +92,4 @@ fn draw_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let footer = Paragraph::new(Line::from(spans));
     frame.render_widget(footer, area);
-}
-
-fn border_style(app: &App, panel: Panel) -> Style {
-    if app.active_panel == panel {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    }
 }

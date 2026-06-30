@@ -45,16 +45,16 @@
 
 ---
 
-## Fase 4 — Coleções
+## Fase 4 — Coleções ✅
 
 **Objetivo:** Salvar e organizar requests.
 
-- [ ] Modelo de dados para coleções (JSON em disco)
-- [ ] Sidebar com lista de coleções/pastas
-- [ ] Salvar request atual (`Ctrl+S`)
-- [ ] Carregar request da coleção (Enter na sidebar)
-- [ ] Criar/renomear/deletar coleções e pastas
-- [ ] Diretório padrão: `~/.config/posterm/collections/`
+- [x] Modelo de dados para coleções (JSON em disco)
+- [x] Sidebar com lista de coleções/pastas
+- [x] Salvar request atual (`Ctrl+S`)
+- [x] Carregar request da coleção (Enter na sidebar)
+- [x] Criar/deletar coleções (`Ctrl+N` / `d`)
+- [x] Diretório padrão: `~/.config/posterm/collections/`
 
 **Entrega:** Requests persistem entre sessões, organizadas em pastas.
 
@@ -92,6 +92,7 @@
 **Objetivo:** UX refinada e features de qualidade de vida.
 
 - [ ] Menu de configurações (keybindings customizáveis)
+- [ ] Editor de body avançado (multilinhas, scroll, movimentação de cursor, syntax highlight)
 - [ ] Temas de cores (pelo menos dark/light)
 - [ ] Resize responsivo
 - [ ] Copy response body para clipboard

@@ -44,7 +44,15 @@ fn draw_method_url(frame: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Length(method_width), Constraint::Min(1)])
         .split(area);
 
-    let method_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let method_color = match app.request.method.as_str() {
+        "GET" => Color::Green,
+        "POST" => Color::Yellow,
+        "PUT" => Color::Blue,
+        "DELETE" => Color::Red,
+        "PATCH" => Color::Magenta,
+        _ => Color::White,
+    };
+    let method_style = Style::default().fg(method_color).add_modifier(Modifier::BOLD);
     let method = Paragraph::new(Span::styled(
         format!(" {} ", app.request.method.as_str()),
         method_style,
