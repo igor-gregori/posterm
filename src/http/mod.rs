@@ -6,6 +6,7 @@ use reqwest::Client;
 
 use models::{KeyValue, Method, RequestModel};
 
+#[allow(dead_code)]
 pub struct Response {
     pub status: u16,
     pub status_text: String,

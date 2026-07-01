@@ -60,15 +60,15 @@
 
 ---
 
-## Fase 5 — Ambientes e Variáveis
+## Fase 5 — Ambientes e Variáveis ✅
 
 **Objetivo:** Suporte a variáveis de ambiente com interpolação.
 
-- [ ] Modelo de dados para environments (JSON)
-- [ ] Seletor de ambiente ativo (`Ctrl+E`)
-- [ ] Interpolação `{{variable}}` em URL, headers e body
-- [ ] Editor de variáveis por ambiente
-- [ ] Indicador do ambiente ativo no header
+- [x] Modelo de dados para environments (JSON)
+- [x] Seletor de ambiente ativo (`Ctrl+E`)
+- [x] Interpolação `{{variable}}` em URL, headers e body
+- [x] Editor de variáveis por ambiente (`Ctrl+W`)
+- [x] Indicador do ambiente ativo no header
 
 **Entrega:** Usuário troca entre dev/staging/prod e variáveis são substituídas.
 

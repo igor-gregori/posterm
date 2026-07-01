@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Method {
     Get,
     Post,
@@ -8,14 +8,6 @@ pub enum Method {
 }
 
 impl Method {
-    pub const ALL: [Method; 5] = [
-        Method::Get,
-        Method::Post,
-        Method::Put,
-        Method::Delete,
-        Method::Patch,
-    ];
-
     pub fn as_str(&self) -> &'static str {
         match self {
             Method::Get => "GET",
@@ -35,19 +27,9 @@ impl Method {
             Method::Patch => Method::Get,
         }
     }
-
-    pub fn prev(&self) -> Self {
-        match self {
-            Method::Get => Method::Patch,
-            Method::Post => Method::Get,
-            Method::Put => Method::Post,
-            Method::Delete => Method::Put,
-            Method::Patch => Method::Delete,
-        }
-    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct KeyValue {
     pub key: String,
     pub value: String,

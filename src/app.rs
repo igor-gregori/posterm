@@ -1,6 +1,7 @@
 use crate::http;
 use crate::http::models::RequestModel;
 use crate::storage::collections::{self, Collection};
+use crate::storage::env::{self, Environments};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Panel {
@@ -28,6 +29,10 @@ pub enum EditingField {
 pub enum Dialog {
     SaveRequest,
     NewCollection,
+    SelectEnv,
+    NewEnv,
+    EditEnvVars,
+    Help,
 }
 
 pub struct App {
@@ -41,7 +46,6 @@ pub struct App {
     pub tick: usize,
     // KV editor state
     pub kv_row: usize,
-    pub kv_on_key: bool,
     // Collections
     pub collections: Vec<Collection>,
     pub sidebar_collection: usize,
@@ -50,11 +54,19 @@ pub struct App {
     // Dialog
     pub dialog: Option<Dialog>,
     pub dialog_input: String,
+    pub dialog_selection: usize,
+    // Text cursor
+    pub cursor_pos: usize,
+    // Environments
+    pub environments: Environments,
+    pub env_edit_row: usize,
+    pub env_edit_vars: Vec<(String, String)>,
 }
 
 impl App {
     pub fn new() -> Self {
         let collections = collections::load_collections();
+        let environments = env::load_environments();
         Self {
             running: true,
             active_panel: Panel::Request,
@@ -65,13 +77,17 @@ impl App {
             loading: false,
             tick: 0,
             kv_row: 0,
-            kv_on_key: true,
             collections,
             sidebar_collection: 0,
             sidebar_request: None,
             sidebar_expanded: None,
             dialog: None,
             dialog_input: String::new(),
+            dialog_selection: 0,
+            cursor_pos: 0,
+            environments,
+            env_edit_row: 0,
+            env_edit_vars: Vec::new(),
         }
     }
 
@@ -83,7 +99,10 @@ impl App {
         };
     }
 
-    pub fn reload_collections(&mut self) {
-        self.collections = collections::load_collections();
+    pub fn active_env_name(&self) -> &str {
+        self.environments
+            .active
+            .as_deref()
+            .unwrap_or("none")
     }
 }
