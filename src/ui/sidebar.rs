@@ -11,11 +11,18 @@ use crate::app::{App, Panel};
 pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let is_active = app.active_panel == Panel::Sidebar;
 
+    let active_color = app.environments.active_env()
+        .map(|e| {
+            let (r, g, b) = crate::storage::env::color_to_rgb(&e.color);
+            Color::Rgb(r, g, b)
+        })
+        .unwrap_or(Color::Cyan);
+
     let block = Block::default()
         .title(" Collections ")
         .borders(Borders::ALL)
         .border_style(if is_active {
-            Style::default().fg(Color::Cyan)
+            Style::default().fg(active_color)
         } else {
             Style::default().fg(Color::DarkGray)
         });
@@ -47,7 +54,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
 
         lines.push(Line::from(vec![
             Span::styled(
-                if is_selected_col && is_active { "›" } else { " " },
+                if is_selected_col && is_active { " " } else { " " },
                 Style::default().fg(Color::Cyan),
             ),
             Span::styled(format!("{} ", icon), Style::default().fg(Color::DarkGray)),
@@ -81,7 +88,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
 
                 lines.push(Line::from(vec![
                     Span::styled(
-                        if is_selected_req { " ›" } else { "  " },
+                        if is_selected_req { "  " } else { "  " },
                         Style::default().fg(Color::Cyan),
                     ),
                     Span::styled(

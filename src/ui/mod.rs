@@ -4,173 +4,90 @@ pub mod response;
 pub mod sidebar;
 
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
-use crate::app::{App, EditingField};
+use crate::app::App;
 
 pub fn draw(frame: &mut Frame, app: &App) {
-    let main_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
+    // 3 vertical columns filling 100% width
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(30),  // Sidebar column
+            Constraint::Min(1),     // Request (fills remaining)
+            Constraint::Min(1),     // Response (fills remaining)
+        ])
         .split(frame.area());
 
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
-        .split(main_layout[0]);
-
-    let right = Layout::default()
+    // Sidebar column: Collections (top) + Shortcuts panel (bottom)
+    let sidebar_split = Layout::default()
         .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(5)])
+        .split(columns[0]);
+
+    // Right side split equally between Request and Response
+    let right_area = Rect {
+        x: columns[1].x,
+        y: columns[1].y,
+        width: frame.area().width - columns[0].width,
+        height: frame.area().height,
+    };
+    let right_panels = Layout::default()
+        .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(chunks[1]);
+        .split(right_area);
 
-    // Sidebar
-    sidebar::draw(frame, app, chunks[0]);
-
-    // Request panel
-    request::draw(frame, app, right[0]);
-
-    // Response panel
-    response::draw(frame, app, right[1]);
-
-    // Footer (left: hints, right: env indicator)
-    draw_footer(frame, app, main_layout[1]);
+    // Render panels
+    sidebar::draw(frame, app, sidebar_split[0]);
+    draw_shortcuts_panel(frame, app, sidebar_split[1]);
+    request::draw(frame, app, right_panels[0]);
+    response::draw(frame, app, right_panels[1]);
 
     // Dialog overlay (on top of everything)
     dialog::draw(frame, app);
 }
 
-fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
-    // Status message takes priority
-    if let Some(ref msg) = app.status_message {
-        let line = Line::from(Span::styled(
-            format!(" ✓ {} ", msg),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-        ));
-        frame.render_widget(Paragraph::new(line), area);
+fn draw_shortcuts_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .title(" Info ")
+        .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+        .border_style(Style::default().fg(Color::DarkGray));
 
-        // Still show env on the right
-        let env_spans = get_env_indicator(app);
-        let right = Paragraph::new(Line::from(env_spans)).alignment(Alignment::Right);
-        frame.render_widget(right, area);
-        return;
-    }
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    let hints = get_contextual_hints(app);
-
-    let left_spans: Vec<Span> = hints
-        .iter()
-        .enumerate()
-        .flat_map(|(i, (key, desc))| {
-            let mut s = vec![
-                Span::styled(
-                    format!(" {} ", key),
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::DarkGray)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(format!(" {} ", desc), Style::default().fg(Color::DarkGray)),
-            ];
-            if i < hints.len() - 1 {
-                s.push(Span::raw(" "));
-            }
-            s
-        })
-        .collect();
-
-    let left = Paragraph::new(Line::from(left_spans));
-    frame.render_widget(left, area);
-
-    // Env indicator on the right
-    let env_spans = get_env_indicator(app);
-    let right = Paragraph::new(Line::from(env_spans)).alignment(Alignment::Right);
-    frame.render_widget(right, area);
-}
-
-fn get_contextual_hints(app: &App) -> Vec<(&'static str, &'static str)> {
-    if let Some(dialog) = app.dialog {
-        match dialog {
-            crate::app::Dialog::SelectEnv => vec![
-                ("↑/↓", "Navigate"),
-                ("c", "Color"),
-                ("Enter", "Select"),
-                ("Esc", "Cancel"),
-            ],
-            crate::app::Dialog::EditEnvVars => vec![
-                ("↑/↓", "Navigate"),
-                ("Enter", "New row"),
-                ("Esc", "Save & close"),
-            ],
-            crate::app::Dialog::Help => vec![
-                ("Esc/F1", "Close"),
-            ],
-            crate::app::Dialog::History => vec![
-                ("↑/↓", "Navigate"),
-                ("Enter", "Load"),
-                ("d", "Delete"),
-                ("Esc", "Close"),
-            ],
-            crate::app::Dialog::CurlExport => vec![
-                ("Esc", "Close"),
-            ],
-            _ => vec![("Esc", "Cancel"), ("Enter", "Confirm")],
-        }
-    } else if let Some(field) = app.editing {
-        match field {
-            EditingField::Url => vec![
-                ("←/→", "Cursor"),
-                ("Enter", "Done"),
-                ("Esc", "Done"),
-                ("F1", "Help"),
-            ],
-            EditingField::Body => vec![
-                ("←/→", "Cursor"),
-                ("Enter", "New line"),
-                ("Esc", "Done"),
-                ("F1", "Help"),
-            ],
-            EditingField::Headers | EditingField::Params => vec![
-                ("←/→", "Cursor"),
-                ("↑/↓", "Rows"),
-                ("Enter", "New row"),
-                ("Esc", "Done"),
-                ("F1", "Help"),
-            ],
-        }
-    } else {
-        vec![
-            ("Ctrl+R", "Send"),
-            ("Ctrl+U", "URL"),
-            ("Ctrl+E", "Env"),
-            ("Tab", "Panel"),
-            ("F1", "Help"),
-        ]
-    }
-}
-
-fn get_env_indicator(app: &App) -> Vec<Span<'static>> {
-    match app.environments.active_env() {
+    let env_badge = match app.environments.active_env() {
         Some(env) => {
             let (r, g, b) = crate::storage::env::color_to_rgb(&env.color);
             let env_color = Color::Rgb(r, g, b);
-            vec![
-                Span::styled(
-                    format!(" {} ({} vars) ", env.name, env.variables.len()),
-                    Style::default().fg(Color::Black).bg(env_color).add_modifier(Modifier::BOLD),
-                ),
-            ]
+            Line::from(Span::styled(
+                format!(" {} ({} vars) ", env.name, env.variables.len()),
+                Style::default().fg(Color::Black).bg(env_color).add_modifier(Modifier::BOLD),
+            ))
         }
-        None => vec![
-            Span::styled(
-                " ○ none ",
-                Style::default().fg(Color::DarkGray),
-            ),
-        ],
-    }
+        None => Line::from(Span::styled(
+            " no env ",
+            Style::default().fg(Color::DarkGray),
+        )),
+    };
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(" F1", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(" Help", Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(vec![
+            Span::styled(" F2", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(" Configs", Style::default().fg(Color::DarkGray)),
+        ]),
+        env_badge,
+    ];
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, inner);
 }
