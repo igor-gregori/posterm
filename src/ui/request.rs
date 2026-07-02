@@ -189,8 +189,8 @@ fn highlight_json_body(text: &str) -> Vec<Line<'static>> {
 
 /// Renders multiline text with a block cursor at the given position
 fn render_multiline_with_cursor(text: &str, cursor_pos: usize) -> Vec<Line<'static>> {
-    let pos = cursor_pos.min(text.len());
-    let (before_cursor, after_cursor) = text.split_at(pos);
+    let pos = snap_to_char_boundary(text, cursor_pos);
+    let before_cursor = &text[..pos];
 
     // Split into lines, tracking where the cursor is
     let full_before_lines: Vec<&str> = before_cursor.split('\n').collect();
@@ -202,8 +202,7 @@ fn render_multiline_with_cursor(text: &str, cursor_pos: usize) -> Vec<Line<'stat
 
     for (i, line_text) in all_lines.iter().enumerate() {
         if i == cursor_line_idx {
-            // This line has the cursor
-            let col = cursor_col.min(line_text.len());
+            let col = snap_to_char_boundary(line_text, cursor_col);
             let (before, after) = line_text.split_at(col);
 
             if after.is_empty() {
@@ -212,8 +211,10 @@ fn render_multiline_with_cursor(text: &str, cursor_pos: usize) -> Vec<Line<'stat
                     Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)),
                 ]));
             } else {
-                let cursor_char = &after[..1];
-                let rest = &after[1..];
+                let ch = after.chars().next().unwrap();
+                let ch_len = ch.len_utf8();
+                let cursor_char = &after[..ch_len];
+                let rest = &after[ch_len..];
                 result.push(Line::from(vec![
                     Span::styled(before.to_string(), Style::default().fg(Color::White)),
                     Span::styled(cursor_char.to_string(), Style::default().fg(Color::Black).bg(Color::White)),
@@ -230,19 +231,19 @@ fn render_multiline_with_cursor(text: &str, cursor_pos: usize) -> Vec<Line<'stat
 
 /// Renders text with a block cursor (inverted colors at cursor position)
 fn render_text_with_cursor(text: &str, cursor_pos: usize, color: Color) -> Line<'static> {
-    let pos = cursor_pos.min(text.len());
+    let pos = snap_to_char_boundary(text, cursor_pos);
     let (before, after) = text.split_at(pos);
 
     if after.is_empty() {
-        // Cursor at end — show block space
         Line::from(vec![
             Span::styled(before.to_string(), Style::default().fg(color)),
             Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)),
         ])
     } else {
-        // Cursor on a character — invert it
-        let cursor_char = &after[..1];
-        let rest = &after[1..];
+        let ch = after.chars().next().unwrap();
+        let ch_len = ch.len_utf8();
+        let cursor_char = &after[..ch_len];
+        let rest = &after[ch_len..];
         Line::from(vec![
             Span::styled(before.to_string(), Style::default().fg(color)),
             Span::styled(cursor_char.to_string(), Style::default().fg(Color::Black).bg(Color::White)),
@@ -253,7 +254,7 @@ fn render_text_with_cursor(text: &str, cursor_pos: usize, color: Color) -> Line<
 
 /// Renders a KV line with cursor in the inline display
 fn render_kv_line_with_cursor(marker: &str, display: &str, cursor_pos: usize) -> Line<'static> {
-    let pos = cursor_pos.min(display.len());
+    let pos = snap_to_char_boundary(display, cursor_pos);
     let (before, after) = display.split_at(pos);
 
     let mut spans = vec![
@@ -264,12 +265,28 @@ fn render_kv_line_with_cursor(marker: &str, display: &str, cursor_pos: usize) ->
         spans.push(Span::styled(before.to_string(), Style::default().fg(Color::White)));
         spans.push(Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)));
     } else {
-        let cursor_char = &after[..1];
-        let rest = &after[1..];
+        let ch = after.chars().next().unwrap();
+        let ch_len = ch.len_utf8();
+        let cursor_char = &after[..ch_len];
+        let rest = &after[ch_len..];
         spans.push(Span::styled(before.to_string(), Style::default().fg(Color::White)));
         spans.push(Span::styled(cursor_char.to_string(), Style::default().fg(Color::Black).bg(Color::White)));
         spans.push(Span::styled(rest.to_string(), Style::default().fg(Color::White)));
     }
 
     Line::from(spans)
+}
+
+/// Snap a byte position to the nearest valid char boundary (rounding down)
+fn snap_to_char_boundary(s: &str, pos: usize) -> usize {
+    let pos = pos.min(s.len());
+    if s.is_char_boundary(pos) {
+        return pos;
+    }
+    // Walk backwards to find a valid boundary
+    let mut p = pos;
+    while p > 0 && !s.is_char_boundary(p) {
+        p -= 1;
+    }
+    p
 }

@@ -179,7 +179,7 @@ fn draw_edit_env_vars(frame: &mut Frame, app: &App) {
 }
 
 fn render_env_line_with_cursor(marker: &str, display: &str, cursor_pos: usize) -> Line<'static> {
-    let pos = cursor_pos.min(display.len());
+    let pos = snap_to_char_boundary(display, cursor_pos);
     let (before, after) = display.split_at(pos);
 
     let mut spans = vec![
@@ -190,8 +190,10 @@ fn render_env_line_with_cursor(marker: &str, display: &str, cursor_pos: usize) -
         spans.push(Span::styled(before.to_string(), Style::default().fg(Color::White)));
         spans.push(Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)));
     } else {
-        let cursor_char = &after[..1];
-        let rest = &after[1..];
+        let ch = after.chars().next().unwrap();
+        let ch_len = ch.len_utf8();
+        let cursor_char = &after[..ch_len];
+        let rest = &after[ch_len..];
         spans.push(Span::styled(before.to_string(), Style::default().fg(Color::White)));
         spans.push(Span::styled(cursor_char.to_string(), Style::default().fg(Color::Black).bg(Color::White)));
         spans.push(Span::styled(rest.to_string(), Style::default().fg(Color::White)));
@@ -200,9 +202,22 @@ fn render_env_line_with_cursor(marker: &str, display: &str, cursor_pos: usize) -
     Line::from(spans)
 }
 
+/// Snap a byte position to the nearest valid char boundary (rounding down)
+fn snap_to_char_boundary(s: &str, pos: usize) -> usize {
+    let pos = pos.min(s.len());
+    if s.is_char_boundary(pos) {
+        return pos;
+    }
+    let mut p = pos;
+    while p > 0 && !s.is_char_boundary(p) {
+        p -= 1;
+    }
+    p
+}
+
 fn draw_curl_export(frame: &mut Frame, app: &App) {
     let lines_count = app.curl_output.lines().count() as u16;
-    let height = (lines_count + 3).min(20).max(5);
+    let height = (lines_count + 3).clamp(5, 20);
     let area = centered_rect(80, height, frame.area());
     frame.render_widget(Clear, area);
 
@@ -224,7 +239,7 @@ fn draw_curl_export(frame: &mut Frame, app: &App) {
 }
 
 fn draw_history(frame: &mut Frame, app: &App) {
-    let height = (app.history.entries.len() as u16 + 3).min(20).max(5);
+    let height = (app.history.entries.len() as u16 + 3).clamp(5, 20);
     let area = centered_rect(70, height, frame.area());
     frame.render_widget(Clear, area);
 

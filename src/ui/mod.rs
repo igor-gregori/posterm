@@ -94,8 +94,8 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn get_contextual_hints(app: &App) -> Vec<(&'static str, &'static str)> {
-    if app.dialog.is_some() {
-        match app.dialog.unwrap() {
+    if let Some(dialog) = app.dialog {
+        match dialog {
             crate::app::Dialog::SelectEnv => vec![
                 ("↑/↓", "Navigate"),
                 ("c", "Color"),

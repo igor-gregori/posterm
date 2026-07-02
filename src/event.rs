@@ -269,9 +269,8 @@ fn handle_dialog(app: &mut App, key: KeyEvent) {
             }
         }
         Dialog::CurlExport => {
-            match key.code {
-                KeyCode::Esc => app.dialog = None,
-                _ => {}
+            if key.code == KeyCode::Esc {
+                app.dialog = None;
             }
         }
         Dialog::History => handle_history_dialog(app, key),
@@ -304,15 +303,13 @@ fn handle_history_dialog(app: &mut App, key: KeyEvent) {
                 app.active_panel = Panel::Request;
             }
         }
-        KeyCode::Char('d') => {
-            if !app.history.entries.is_empty() {
-                app.history.entries.remove(app.history_selection);
-                let _ = crate::storage::history::save_history(&app.history);
-                if app.history_selection > 0
-                    && app.history_selection >= app.history.entries.len()
-                {
-                    app.history_selection = app.history.entries.len().saturating_sub(1);
-                }
+        KeyCode::Char('d') if !app.history.entries.is_empty() => {
+            app.history.entries.remove(app.history_selection);
+            let _ = crate::storage::history::save_history(&app.history);
+            if app.history_selection > 0
+                && app.history_selection >= app.history.entries.len()
+            {
+                app.history_selection = app.history.entries.len().saturating_sub(1);
             }
         }
         _ => {}
@@ -513,16 +510,18 @@ fn split_env_kv(s: &str) -> (String, String) {
 }
 
 fn save_env_vars(app: &mut App) {
-    if let Some(ref active_name) = app.environments.active.clone() {
-        if let Some(env) = app.environments.environments.iter_mut().find(|e| &e.name == active_name) {
-            env.variables.clear();
-            for (k, v) in &app.env_edit_vars {
-                if !k.is_empty() {
-                    env.variables.insert(k.clone(), v.clone());
-                }
+    let active_name = match &app.environments.active {
+        Some(name) => name.clone(),
+        None => return,
+    };
+    if let Some(env) = app.environments.environments.iter_mut().find(|e| e.name == active_name) {
+        env.variables.clear();
+        for (k, v) in &app.env_edit_vars {
+            if !k.is_empty() {
+                env.variables.insert(k.clone(), v.clone());
             }
-            let _ = env::save_environments(&app.environments);
         }
+        let _ = env::save_environments(&app.environments);
     }
 }
 

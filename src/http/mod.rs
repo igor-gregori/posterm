@@ -4,13 +4,11 @@ use std::time::{Duration, Instant};
 
 use reqwest::Client;
 
-use models::{KeyValue, Method, RequestModel};
+use models::{Method, RequestModel};
 
-#[allow(dead_code)]
 pub struct Response {
     pub status: u16,
     pub status_text: String,
-    pub headers: Vec<KeyValue>,
     pub body: String,
     pub duration: Duration,
 }
@@ -45,20 +43,11 @@ pub async fn send_request(req: &RequestModel) -> Result<Response, String> {
 
     let status = resp.status().as_u16();
     let status_text = resp.status().canonical_reason().unwrap_or("").to_string();
-    let headers = resp
-        .headers()
-        .iter()
-        .map(|(k, v)| KeyValue {
-            key: k.to_string(),
-            value: v.to_str().unwrap_or("").to_string(),
-        })
-        .collect();
     let body = resp.text().await.map_err(|e| format_error(&e))?;
 
     Ok(Response {
         status,
         status_text,
-        headers,
         body,
         duration,
     })
@@ -86,9 +75,9 @@ fn format_error(e: &reqwest::Error) -> String {
     } else if e.is_connect() {
         let msg = e.to_string();
         if msg.contains("dns") || msg.contains("resolve") || msg.contains("Name or service not known") {
-            format!("DNS error: could not resolve host")
+            "DNS error: could not resolve host".to_string()
         } else {
-            format!("Connection refused: could not connect to server")
+            "Connection refused: could not connect to server".to_string()
         }
     } else if e.is_request() {
         let msg = e.to_string();
