@@ -18,15 +18,19 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
+            rpm: true
           - target: x86_64-apple-darwin
             os: macos-latest
             archive: tar.gz
+            rpm: false
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
+            rpm: false
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
+            rpm: false
 
     steps:
       - uses: actions/checkout@v4
@@ -54,11 +58,26 @@ jobs:
           7z a ../../../posterm-${{ matrix.target }}.zip posterm.exe
           cd ../../..
 
+      - name: Generate RPM
+        if: matrix.rpm
+        run: |
+          cargo install cargo-generate-rpm
+          cp target/${{ matrix.target }}/release/posterm target/release/posterm
+          cargo generate-rpm
+          cp target/generate-rpm/posterm-*.rpm posterm-x86_64.rpm
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: posterm-${{ matrix.target }}
           path: posterm-${{ matrix.target }}.${{ matrix.archive }}
+
+      - name: Upload RPM artifact
+        if: matrix.rpm
+        uses: actions/upload-artifact@v4
+        with:
+          name: posterm-rpm
+          path: posterm-x86_64.rpm
 
   release:
     name: Create Release

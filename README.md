@@ -21,12 +21,25 @@ Download from [GitHub Releases](https://github.com/igor-gregori/posterm/releases
 
 Extract and move to a directory in your PATH.
 
+### CentOS / RHEL / Fedora (via dnf)
+
+```bash
+# Install
+curl -LO https://github.com/igor-gregori/posterm/releases/latest/download/posterm-x86_64.rpm
+sudo dnf install ./posterm-x86_64.rpm
+
+# Update to latest version
+curl -LO https://github.com/igor-gregori/posterm/releases/latest/download/posterm-x86_64.rpm
+sudo dnf upgrade ./posterm-x86_64.rpm
+```
+
 ## Features
 
 - **Request builder** — GET, POST, PUT, DELETE, PATCH with headers, body, and query params
 - **Response viewer** — Status, headers, and body with syntax highlighting
 - **Collections** — Save and organize requests in folders
 - **Environments** — Profiles (dev, staging, prod) with `{{variable}}` interpolation
+- **History** — Recent requests log with re-execute
 
 ## Keybindings
 
@@ -37,12 +50,14 @@ Press `F1` in-app for the full list. Key shortcuts:
 | `Ctrl+R` | Send request |
 | `Ctrl+T` | Cycle method |
 | `Ctrl+U` | Edit URL |
-| `Ctrl+H` | Edit headers |
+| `Ctrl+D` | Edit headers |
 | `Ctrl+B` | Edit body |
 | `Ctrl+P` | Edit params |
 | `Ctrl+S` | Save to collection |
 | `Ctrl+E` | Switch environment |
 | `Ctrl+W` | Edit env variables |
+| `Ctrl+H` | History |
+| `Ctrl+X` | Export as cURL |
 | `Tab` | Switch panel |
 | `F1` | Help |
 | `q` | Quit |
