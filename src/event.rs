@@ -9,7 +9,7 @@ use crate::storage::env::{self, Environment, interpolate};
 
 pub fn handle_events(
     app: &mut App,
-    tx: &mpsc::Sender<Result<http::Response, String>>,
+    tx: &mpsc::Sender<(SavedRequest, Result<http::Response, String>)>,
 ) -> std::io::Result<()> {
     if event::poll(std::time::Duration::from_millis(16))? {
         if let Event::Key(key) = event::read()? {
@@ -25,7 +25,7 @@ pub fn handle_events(
     Ok(())
 }
 
-fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<Result<http::Response, String>>) {
+fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<(SavedRequest, Result<http::Response, String>)>) {
     match (key.modifiers, key.code) {
         // Global
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.running = false,
@@ -40,10 +40,11 @@ fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<Result<http::Re
             if !app.loading && !app.request.url.is_empty() {
                 app.loading = true;
                 let interpolated = interpolate_request(&app.request, &app.environments);
+                let saved = SavedRequest::from_model("", &app.request);
                 let tx = tx.clone();
                 tokio::spawn(async move {
                     let result = http::send_request(&interpolated).await;
-                    let _ = tx.send(result).await;
+                    let _ = tx.send((saved, result)).await;
                 });
             }
         }
@@ -58,7 +59,7 @@ fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<Result<http::Re
             app.cursor_pos = app.request.url.len();
             app.editing = Some(EditingField::Url);
         }
-        (KeyModifiers::CONTROL, KeyCode::Char('h')) => {
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
             app.request_tab = RequestTab::Headers;
             app.kv_row = 0;
             let kv = &app.request.headers[0];
@@ -76,6 +77,12 @@ fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<Result<http::Re
             let kv = &app.request.params[0];
             app.cursor_pos = format!("{}={}", kv.key, kv.value).len();
             app.editing = Some(EditingField::Params);
+        }
+
+        // History popup: Ctrl+H
+        (KeyModifiers::CONTROL, KeyCode::Char('h')) => {
+            app.history_selection = 0;
+            app.dialog = Some(Dialog::History);
         }
 
         // Save request: Ctrl+S
@@ -243,10 +250,48 @@ fn handle_dialog(app: &mut App, key: KeyEvent) {
                 _ => {}
             }
         }
+        Dialog::History => handle_history_dialog(app, key),
         Dialog::SelectEnv => handle_select_env(app, key),
         Dialog::NewEnv => handle_new_env(app, key),
         Dialog::EditEnvVars => handle_edit_env_vars(app, key),
         _ => handle_text_dialog(app, key),
+    }
+}
+
+fn handle_history_dialog(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => app.dialog = None,
+        KeyCode::Up => {
+            if app.history_selection > 0 {
+                app.history_selection -= 1;
+            }
+        }
+        KeyCode::Down => {
+            if app.history_selection < app.history.entries.len().saturating_sub(1) {
+                app.history_selection += 1;
+            }
+        }
+        KeyCode::Enter => {
+            if !app.history.entries.is_empty() {
+                let entry = &app.history.entries[app.history_selection];
+                app.request = entry.request.to_model();
+                app.response = None;
+                app.dialog = None;
+                app.active_panel = Panel::Request;
+            }
+        }
+        KeyCode::Char('d') => {
+            if !app.history.entries.is_empty() {
+                app.history.entries.remove(app.history_selection);
+                let _ = crate::storage::history::save_history(&app.history);
+                if app.history_selection > 0
+                    && app.history_selection >= app.history.entries.len()
+                {
+                    app.history_selection = app.history.entries.len().saturating_sub(1);
+                }
+            }
+        }
+        _ => {}
     }
 }
 

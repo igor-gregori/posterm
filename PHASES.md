@@ -74,14 +74,15 @@
 
 ---
 
-## Fase 6 — Histórico
+## Fase 6 — Histórico ✅
 
 **Objetivo:** Log de requests recentes.
 
-- [ ] Salvar cada request+response enviada
-- [ ] Visualizar histórico na sidebar (tab ou toggle)
-- [ ] Re-executar request do histórico
-- [ ] Limite configurável (últimas N requests)
+- [x] Salvar cada request+response enviada
+- [x] Visualizar histórico na sidebar (tab toggle ←/→)
+- [x] Re-executar request do histórico (Enter)
+- [x] Limite configurável (últimas 50 requests)
+- [x] Deletar entries (d)
 
 **Entrega:** Usuário consulta e repete requests anteriores.
 

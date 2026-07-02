@@ -95,6 +95,12 @@ fn get_contextual_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             crate::app::Dialog::Help => vec![
                 ("Esc/F1", "Close"),
             ],
+            crate::app::Dialog::History => vec![
+                ("↑/↓", "Navigate"),
+                ("Enter", "Load"),
+                ("d", "Delete"),
+                ("Esc", "Close"),
+            ],
             _ => vec![("Esc", "Cancel"), ("Enter", "Confirm")],
         }
     } else if let Some(field) = app.editing {

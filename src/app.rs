@@ -2,6 +2,7 @@ use crate::http;
 use crate::http::models::RequestModel;
 use crate::storage::collections::{self, Collection};
 use crate::storage::env::{self, Environments};
+use crate::storage::history::{self, History};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Panel {
@@ -33,6 +34,7 @@ pub enum Dialog {
     NewEnv,
     EditEnvVars,
     Help,
+    History,
 }
 
 pub struct App {
@@ -51,6 +53,9 @@ pub struct App {
     pub sidebar_collection: usize,
     pub sidebar_request: Option<usize>,
     pub sidebar_expanded: Option<usize>,
+    // History
+    pub history: History,
+    pub history_selection: usize,
     // Dialog
     pub dialog: Option<Dialog>,
     pub dialog_input: String,
@@ -67,6 +72,7 @@ impl App {
     pub fn new() -> Self {
         let collections = collections::load_collections();
         let environments = env::load_environments();
+        let history = history::load_history();
         Self {
             running: true,
             active_panel: Panel::Request,
@@ -81,6 +87,8 @@ impl App {
             sidebar_collection: 0,
             sidebar_request: None,
             sidebar_expanded: None,
+            history_selection: 0,
+            history,
             dialog: None,
             dialog_input: String::new(),
             dialog_selection: 0,

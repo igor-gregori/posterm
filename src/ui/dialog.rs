@@ -26,6 +26,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Dialog::Help => {
             draw_help(frame);
         }
+        Dialog::History => {
+            draw_history(frame, app);
+        }
     }
 }
 
@@ -194,6 +197,101 @@ fn render_env_line_with_cursor(marker: &str, display: &str, cursor_pos: usize) -
     Line::from(spans)
 }
 
+fn draw_history(frame: &mut Frame, app: &App) {
+    let height = (app.history.entries.len() as u16 + 3).min(20).max(5);
+    let area = centered_rect(70, height, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" History (Enter: load, d: delete, Esc: close) ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if app.history.entries.is_empty() {
+        let hint = Paragraph::new(Span::styled(
+            " (empty)",
+            Style::default().fg(Color::DarkGray),
+        ));
+        frame.render_widget(hint, inner);
+        return;
+    }
+
+    let max_visible = inner.height as usize;
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Scroll: keep selection visible
+    let scroll_offset = if app.history_selection >= max_visible {
+        app.history_selection - max_visible + 1
+    } else {
+        0
+    };
+
+    for (i, entry) in app.history.entries.iter().enumerate().skip(scroll_offset).take(max_visible) {
+        let is_selected = i == app.history_selection;
+
+        let method_color = match entry.request.method.as_str() {
+            "GET" => Color::Green,
+            "POST" => Color::Yellow,
+            "PUT" => Color::Blue,
+            "DELETE" => Color::Red,
+            "PATCH" => Color::Magenta,
+            _ => Color::White,
+        };
+
+        let status_span = match entry.status {
+            Some(s) => {
+                let color = match s {
+                    200..=299 => Color::Green,
+                    300..=399 => Color::Yellow,
+                    400..=499 => Color::Red,
+                    500..=599 => Color::Magenta,
+                    _ => Color::White,
+                };
+                Span::styled(format!("{}", s), Style::default().fg(color))
+            }
+            None => Span::styled("ERR", Style::default().fg(Color::Red)),
+        };
+
+        let duration = entry.duration_ms
+            .map(|ms| format!(" {}ms", ms))
+            .unwrap_or_default();
+
+        let url_max = (inner.width as usize).saturating_sub(20);
+        let url_display = if entry.request.url.len() > url_max && url_max > 3 {
+            format!("{}...", &entry.request.url[..url_max - 3])
+        } else {
+            entry.request.url.clone()
+        };
+
+        let name_style = if is_selected {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                if is_selected { " › " } else { "   " },
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::styled(
+                format!("{:<6}", entry.request.method),
+                Style::default().fg(method_color),
+            ),
+            status_span,
+            Span::styled(duration, Style::default().fg(Color::DarkGray)),
+            Span::styled(" ", Style::default()),
+            Span::styled(url_display, name_style),
+        ]));
+    }
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, inner);
+}
+
 fn draw_help(frame: &mut Frame) {
     let area = centered_rect(65, 26, frame.area());
     frame.render_widget(Clear, area);
@@ -211,7 +309,7 @@ fn draw_help(frame: &mut Frame) {
         help_line("Ctrl+R", "Send request"),
         help_line("Ctrl+T", "Cycle HTTP method (GET/POST/PUT/DEL/PATCH)"),
         help_line("Ctrl+U", "Edit URL"),
-        help_line("Ctrl+H", "Edit headers (inline key:value)"),
+        help_line("Ctrl+D", "Edit headers (inline key:value)"),
         help_line("Ctrl+B", "Edit body"),
         help_line("Ctrl+P", "Edit params (inline key=value)"),
         Line::from(""),
@@ -221,7 +319,8 @@ fn draw_help(frame: &mut Frame) {
         help_line("Enter", "Load request / expand collection"),
         help_line("d", "Delete request or collection"),
         Line::from(""),
-        section_header("Environments"),
+        section_header("History & Environments"),
+        help_line("Ctrl+H", "Open history"),
         help_line("Ctrl+E", "Select / create environment"),
         help_line("Ctrl+W", "Edit environment variables"),
         help_line("c", "Change env color (in selector)"),
