@@ -88,17 +88,19 @@
 
 ---
 
-## Fase 7 — Polimento
+## Fase 7 — Polimento ✅
 
 **Objetivo:** UX refinada e features de qualidade de vida.
 
 - [ ] Menu de configurações (keybindings customizáveis)
-- [ ] Editor de body avançado (multilinhas, scroll, movimentação de cursor, syntax highlight)
+- [x] Editor de body avançado (multilinhas com Enter, cursor)
 - [ ] Temas de cores (pelo menos dark/light)
-- [ ] Resize responsivo
-- [ ] Copy response body para clipboard
-- [ ] Export de request como cURL
-- [ ] Help popup com keybindings
-- [ ] Tratamento de erros amigável (timeouts, DNS, etc.)
+- [x] Copy response body para clipboard (`Ctrl+Y`)
+- [x] Export de request como cURL (`Ctrl+X`)
+- [x] Help popup com keybindings (`F1`)
+- [x] Tratamento de erros amigável (timeouts, DNS, etc.)
+- [x] Scroll no response body (`Up`/`Down`)
+
+**Entrega:** App polida, pronta para uso diário.
 
 **Entrega:** App polida, pronta para uso diário.

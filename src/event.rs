@@ -119,6 +119,24 @@ fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<(SavedRequest, 
             }
         }
 
+        // Export as cURL popup: Ctrl+X
+        (KeyModifiers::CONTROL, KeyCode::Char('x')) => {
+            if !app.request.url.is_empty() {
+                app.curl_output = export_curl(&app.request);
+                app.dialog = Some(Dialog::CurlExport);
+            }
+        }
+
+        // Response scroll
+        (KeyModifiers::NONE, KeyCode::Up) if app.active_panel == Panel::Response => {
+            if app.response_scroll > 0 {
+                app.response_scroll -= 1;
+            }
+        }
+        (KeyModifiers::NONE, KeyCode::Down) if app.active_panel == Panel::Response => {
+            app.response_scroll += 1;
+        }
+
         // Sidebar navigation
         (KeyModifiers::NONE, KeyCode::Up) if app.active_panel == Panel::Sidebar => {
             handle_sidebar_up(app);
@@ -247,6 +265,12 @@ fn handle_dialog(app: &mut App, key: KeyEvent) {
         Dialog::Help => {
             match key.code {
                 KeyCode::Esc | KeyCode::F(1) => app.dialog = None,
+                _ => {}
+            }
+        }
+        Dialog::CurlExport => {
+            match key.code {
+                KeyCode::Esc => app.dialog = None,
                 _ => {}
             }
         }
@@ -565,10 +589,97 @@ fn handle_editing(app: &mut App, key: KeyEvent) {
 
     match field {
         EditingField::Url => handle_text_edit(app, key, &mut |a| &mut a.request.url),
-        EditingField::Body => handle_text_edit(app, key, &mut |a| &mut a.request.body),
+        EditingField::Body => handle_body_edit(app, key),
         EditingField::Headers => handle_kv_edit(app, key, true),
         EditingField::Params => handle_kv_edit(app, key, false),
     }
+}
+
+fn handle_body_edit(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            // Beautify JSON on exit
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&app.request.body) {
+                if let Ok(pretty) = serde_json::to_string_pretty(&parsed) {
+                    app.request.body = pretty;
+                }
+            }
+            app.editing = None;
+        }
+        KeyCode::Enter => {
+            app.request.body.insert(app.cursor_pos, '\n');
+            app.cursor_pos += 1;
+        }
+        KeyCode::Left => {
+            if app.cursor_pos > 0 { app.cursor_pos -= 1; }
+        }
+        KeyCode::Right => {
+            if app.cursor_pos < app.request.body.len() { app.cursor_pos += 1; }
+        }
+        KeyCode::Up => {
+            // Move cursor to same column on previous line
+            let (line_idx, col) = cursor_line_col(&app.request.body, app.cursor_pos);
+            if line_idx > 0 {
+                app.cursor_pos = pos_from_line_col(&app.request.body, line_idx - 1, col);
+            }
+        }
+        KeyCode::Down => {
+            // Move cursor to same column on next line
+            let (line_idx, col) = cursor_line_col(&app.request.body, app.cursor_pos);
+            let line_count = app.request.body.split('\n').count();
+            if line_idx < line_count - 1 {
+                app.cursor_pos = pos_from_line_col(&app.request.body, line_idx + 1, col);
+            }
+        }
+        KeyCode::Home => {
+            // Move to beginning of current line
+            let (line_idx, _) = cursor_line_col(&app.request.body, app.cursor_pos);
+            app.cursor_pos = pos_from_line_col(&app.request.body, line_idx, 0);
+        }
+        KeyCode::End => {
+            // Move to end of current line
+            let (line_idx, _) = cursor_line_col(&app.request.body, app.cursor_pos);
+            let lines: Vec<&str> = app.request.body.split('\n').collect();
+            let line_len = lines.get(line_idx).map(|l| l.len()).unwrap_or(0);
+            app.cursor_pos = pos_from_line_col(&app.request.body, line_idx, line_len);
+        }
+        KeyCode::Backspace => {
+            if app.cursor_pos > 0 {
+                app.request.body.remove(app.cursor_pos - 1);
+                app.cursor_pos -= 1;
+            }
+        }
+        KeyCode::Delete => {
+            if app.cursor_pos < app.request.body.len() {
+                app.request.body.remove(app.cursor_pos);
+            }
+        }
+        KeyCode::Char(c) => {
+            app.request.body.insert(app.cursor_pos, c);
+            app.cursor_pos += 1;
+        }
+        _ => {}
+    }
+}
+
+/// Get (line_index, column) from a cursor position in text
+fn cursor_line_col(text: &str, pos: usize) -> (usize, usize) {
+    let before = &text[..pos.min(text.len())];
+    let line_idx = before.matches('\n').count();
+    let col = before.rfind('\n').map(|p| pos - p - 1).unwrap_or(pos);
+    (line_idx, col)
+}
+
+/// Get absolute position from (line_index, column)
+fn pos_from_line_col(text: &str, line_idx: usize, col: usize) -> usize {
+    let mut pos = 0;
+    for (i, line) in text.split('\n').enumerate() {
+        if i == line_idx {
+            return pos + col.min(line.len());
+        }
+        pos += line.len() + 1; // +1 for '\n'
+    }
+    text.len()
 }
 
 fn handle_text_edit(
@@ -726,4 +837,36 @@ fn split_kv(s: &str, sep: &str) -> (String, String) {
     } else {
         (s.to_string(), String::new())
     }
+}
+
+fn export_curl(req: &RequestModel) -> String {
+    let mut parts = vec![format!("curl -X {}", req.method.as_str())];
+
+    // URL with params
+    let params: Vec<_> = req.params.iter()
+        .filter(|kv| !kv.key.is_empty())
+        .map(|kv| format!("{}={}", kv.key, kv.value))
+        .collect();
+    let url = if params.is_empty() {
+        req.url.clone()
+    } else {
+        let sep = if req.url.contains('?') { "&" } else { "?" };
+        format!("{}{}{}", req.url, sep, params.join("&"))
+    };
+    parts.push(format!("'{}'", url));
+
+    // Headers
+    for kv in &req.headers {
+        if !kv.key.is_empty() {
+            parts.push(format!("-H '{}: {}'", kv.key, kv.value));
+        }
+    }
+
+    // Body
+    if !req.body.is_empty() {
+        let escaped = req.body.replace('\'', "'\\''");
+        parts.push(format!("-d '{}'", escaped));
+    }
+
+    parts.join(" \\\n  ")
 }

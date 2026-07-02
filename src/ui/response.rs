@@ -51,11 +51,11 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
             .wrap(Wrap { trim: false });
             frame.render_widget(err, inner);
         }
-        Ok(resp) => draw_response(frame, resp, inner),
+        Ok(resp) => draw_response(frame, resp, inner, app.response_scroll),
     }
 }
 
-fn draw_response(frame: &mut Frame, resp: &Response, area: Rect) {
+fn draw_response(frame: &mut Frame, resp: &Response, area: Rect, scroll: usize) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -92,7 +92,9 @@ fn draw_response(frame: &mut Frame, resp: &Response, area: Rect) {
 
     // Body with syntax highlighting
     let body_lines = highlight_json(&resp.body);
-    let body = Paragraph::new(body_lines).wrap(Wrap { trim: false });
+    let body = Paragraph::new(body_lines)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll as u16, 0));
     frame.render_widget(body, chunks[2]);
 }
 

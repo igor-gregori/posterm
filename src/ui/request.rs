@@ -148,16 +148,84 @@ fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
     let is_editing = app.editing == Some(EditingField::Body);
 
     if is_editing {
-        let line = render_text_with_cursor(&app.request.body, app.cursor_pos, Color::White);
-        frame.render_widget(Paragraph::new(line), area);
+        let lines = render_multiline_with_cursor(&app.request.body, app.cursor_pos);
+        frame.render_widget(Paragraph::new(lines), area);
+    } else if app.request.body.is_empty() {
+        let paragraph = Paragraph::new(Span::styled("{ ... }", Style::default().fg(Color::DarkGray)));
+        frame.render_widget(paragraph, area);
     } else {
-        let (text, style) = if app.request.body.is_empty() {
-            ("{ ... }".to_string(), Style::default().fg(Color::DarkGray))
-        } else {
-            (app.request.body.clone(), Style::default().fg(Color::White))
-        };
-        frame.render_widget(Paragraph::new(Span::styled(text, style)), area);
+        let lines = highlight_json_body(&app.request.body);
+        frame.render_widget(Paragraph::new(lines), area);
     }
+}
+
+fn highlight_json_body(text: &str) -> Vec<Line<'static>> {
+    use syntect::easy::HighlightLines;
+    use syntect::highlighting::ThemeSet;
+    use syntect::parsing::SyntaxSet;
+
+    let ss = SyntaxSet::load_defaults_newlines();
+    let ts = ThemeSet::load_defaults();
+    let syntax = ss.find_syntax_by_extension("json").unwrap_or_else(|| ss.find_syntax_plain_text());
+    let theme = &ts.themes["base16-ocean.dark"];
+    let mut h = HighlightLines::new(syntax, theme);
+
+    text.lines()
+        .map(|line| {
+            let spans: Vec<Span<'static>> = match h.highlight_line(line, &ss) {
+                Ok(ranges) => ranges
+                    .into_iter()
+                    .map(|(style, text)| {
+                        let fg = Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b);
+                        Span::styled(text.to_string(), Style::default().fg(fg))
+                    })
+                    .collect(),
+                Err(_) => vec![Span::raw(line.to_string())],
+            };
+            Line::from(spans)
+        })
+        .collect()
+}
+
+/// Renders multiline text with a block cursor at the given position
+fn render_multiline_with_cursor(text: &str, cursor_pos: usize) -> Vec<Line<'static>> {
+    let pos = cursor_pos.min(text.len());
+    let (before_cursor, after_cursor) = text.split_at(pos);
+
+    // Split into lines, tracking where the cursor is
+    let full_before_lines: Vec<&str> = before_cursor.split('\n').collect();
+    let cursor_line_idx = full_before_lines.len() - 1;
+    let cursor_col = full_before_lines.last().unwrap_or(&"").len();
+
+    let all_lines: Vec<&str> = text.split('\n').collect();
+    let mut result: Vec<Line<'static>> = Vec::new();
+
+    for (i, line_text) in all_lines.iter().enumerate() {
+        if i == cursor_line_idx {
+            // This line has the cursor
+            let col = cursor_col.min(line_text.len());
+            let (before, after) = line_text.split_at(col);
+
+            if after.is_empty() {
+                result.push(Line::from(vec![
+                    Span::styled(before.to_string(), Style::default().fg(Color::White)),
+                    Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)),
+                ]));
+            } else {
+                let cursor_char = &after[..1];
+                let rest = &after[1..];
+                result.push(Line::from(vec![
+                    Span::styled(before.to_string(), Style::default().fg(Color::White)),
+                    Span::styled(cursor_char.to_string(), Style::default().fg(Color::Black).bg(Color::White)),
+                    Span::styled(rest.to_string(), Style::default().fg(Color::White)),
+                ]));
+            }
+        } else {
+            result.push(Line::from(Span::styled(line_text.to_string(), Style::default().fg(Color::White))));
+        }
+    }
+
+    result
 }
 
 /// Renders text with a block cursor (inverted colors at cursor position)

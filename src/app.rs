@@ -35,6 +35,7 @@ pub enum Dialog {
     EditEnvVars,
     Help,
     History,
+    CurlExport,
 }
 
 pub struct App {
@@ -46,6 +47,12 @@ pub struct App {
     pub response: Option<Result<http::Response, String>>,
     pub loading: bool,
     pub tick: usize,
+    pub response_scroll: usize,
+    // Status message (for copy/export feedback)
+    pub status_message: Option<String>,
+    pub status_tick: usize,
+    // cURL export
+    pub curl_output: String,
     // KV editor state
     pub kv_row: usize,
     // Collections
@@ -82,6 +89,10 @@ impl App {
             response: None,
             loading: false,
             tick: 0,
+            response_scroll: 0,
+            status_message: None,
+            status_tick: 0,
+            curl_output: String::new(),
             kv_row: 0,
             collections,
             sidebar_collection: 0,

@@ -36,6 +36,11 @@ async fn main() -> io::Result<()> {
 
         app.tick = app.tick.wrapping_add(1);
 
+        // Expire status message after ~3 seconds (180 ticks at 60fps)
+        if app.status_message.is_some() && app.tick.wrapping_sub(app.status_tick) > 180 {
+            app.status_message = None;
+        }
+
         // Check for completed responses
         if let Ok((saved_req, result)) = rx.try_recv() {
             app.loading = false;
@@ -51,6 +56,7 @@ async fn main() -> io::Result<()> {
             let _ = history::save_history(&app.history);
 
             app.response = Some(result);
+            app.response_scroll = 0;
         }
 
         event::handle_events(&mut app, &tx)?;

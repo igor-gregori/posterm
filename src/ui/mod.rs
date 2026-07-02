@@ -46,6 +46,21 @@ pub fn draw(frame: &mut Frame, app: &App) {
 }
 
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
+    // Status message takes priority
+    if let Some(ref msg) = app.status_message {
+        let line = Line::from(Span::styled(
+            format!(" ✓ {} ", msg),
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        ));
+        frame.render_widget(Paragraph::new(line), area);
+
+        // Still show env on the right
+        let env_spans = get_env_indicator(app);
+        let right = Paragraph::new(Line::from(env_spans)).alignment(Alignment::Right);
+        frame.render_widget(right, area);
+        return;
+    }
+
     let hints = get_contextual_hints(app);
 
     let left_spans: Vec<Span> = hints
@@ -101,13 +116,22 @@ fn get_contextual_hints(app: &App) -> Vec<(&'static str, &'static str)> {
                 ("d", "Delete"),
                 ("Esc", "Close"),
             ],
+            crate::app::Dialog::CurlExport => vec![
+                ("Esc", "Close"),
+            ],
             _ => vec![("Esc", "Cancel"), ("Enter", "Confirm")],
         }
     } else if let Some(field) = app.editing {
         match field {
-            EditingField::Url | EditingField::Body => vec![
+            EditingField::Url => vec![
                 ("←/→", "Cursor"),
                 ("Enter", "Done"),
+                ("Esc", "Done"),
+                ("F1", "Help"),
+            ],
+            EditingField::Body => vec![
+                ("←/→", "Cursor"),
+                ("Enter", "New line"),
                 ("Esc", "Done"),
                 ("F1", "Help"),
             ],

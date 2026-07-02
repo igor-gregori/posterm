@@ -40,7 +40,7 @@ pub async fn send_request(req: &RequestModel) -> Result<Response, String> {
     }
 
     let start = Instant::now();
-    let resp = builder.send().await.map_err(|e| e.to_string())?;
+    let resp = builder.send().await.map_err(|e| format_error(&e))?;
     let duration = start.elapsed();
 
     let status = resp.status().as_u16();
@@ -53,7 +53,7 @@ pub async fn send_request(req: &RequestModel) -> Result<Response, String> {
             value: v.to_str().unwrap_or("").to_string(),
         })
         .collect();
-    let body = resp.text().await.map_err(|e| e.to_string())?;
+    let body = resp.text().await.map_err(|e| format_error(&e))?;
 
     Ok(Response {
         status,
@@ -77,5 +77,27 @@ fn build_url(req: &RequestModel) -> String {
     } else {
         let sep = if req.url.contains('?') { "&" } else { "?" };
         format!("{}{}{}", req.url, sep, params.join("&"))
+    }
+}
+
+fn format_error(e: &reqwest::Error) -> String {
+    if e.is_timeout() {
+        "Timeout: the server took too long to respond".to_string()
+    } else if e.is_connect() {
+        let msg = e.to_string();
+        if msg.contains("dns") || msg.contains("resolve") || msg.contains("Name or service not known") {
+            format!("DNS error: could not resolve host")
+        } else {
+            format!("Connection refused: could not connect to server")
+        }
+    } else if e.is_request() {
+        let msg = e.to_string();
+        if msg.contains("invalid") && msg.contains("URL") {
+            "Invalid URL format".to_string()
+        } else {
+            format!("Request error: {}", msg)
+        }
+    } else {
+        e.to_string()
     }
 }

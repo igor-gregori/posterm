@@ -29,6 +29,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Dialog::History => {
             draw_history(frame, app);
         }
+        Dialog::CurlExport => {
+            draw_curl_export(frame, app);
+        }
     }
 }
 
@@ -195,6 +198,29 @@ fn render_env_line_with_cursor(marker: &str, display: &str, cursor_pos: usize) -
     }
 
     Line::from(spans)
+}
+
+fn draw_curl_export(frame: &mut Frame, app: &App) {
+    let lines_count = app.curl_output.lines().count() as u16;
+    let height = (lines_count + 3).min(20).max(5);
+    let area = centered_rect(80, height, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" cURL (Esc to close) ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let lines: Vec<Line> = app.curl_output
+        .lines()
+        .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(Color::White))))
+        .collect();
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, inner);
 }
 
 fn draw_history(frame: &mut Frame, app: &App) {
