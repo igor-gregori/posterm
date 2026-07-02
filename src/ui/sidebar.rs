@@ -53,10 +53,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(
-                if is_selected_col && is_active { " " } else { " " },
-                Style::default().fg(Color::Cyan),
-            ),
+            Span::styled(" ", Style::default().fg(Color::Cyan)),
             Span::styled(format!("{} ", icon), Style::default().fg(Color::DarkGray)),
             Span::styled(&col.name, col_style),
             Span::styled(
@@ -87,10 +84,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
                 };
 
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        if is_selected_req { "  " } else { "  " },
-                        Style::default().fg(Color::Cyan),
-                    ),
+                    Span::styled("  ", Style::default().fg(Color::Cyan)),
                     Span::styled(
                         format!(" {} ", req.method),
                         Style::default().fg(method_color),

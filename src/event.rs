@@ -39,6 +39,7 @@ fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<(SavedRequest, 
         (KeyModifiers::CONTROL, KeyCode::Char('r')) => {
             if !app.loading && !app.request.url.is_empty() {
                 app.loading = true;
+                app.loading_since = std::time::Instant::now();
                 let interpolated = interpolate_request(&app.request, &app.environments);
                 let saved = SavedRequest::from_model("", &app.request);
                 let tx = tx.clone();

@@ -37,10 +37,20 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     if app.loading {
         let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let spinner = frames[(app.tick / 4) % frames.len()];
-        let loading = Paragraph::new(Span::styled(
-            format!(" {} Sending request...", spinner),
-            Style::default().fg(Color::Yellow),
-        ));
+        let elapsed = app.loading_since.elapsed();
+        let secs = elapsed.as_secs();
+        let timer = if secs >= 3600 {
+            format!("{}h {:02}m {:02}s", secs / 3600, (secs % 3600) / 60, secs % 60)
+        } else if secs >= 60 {
+            format!("{}m {:02}s", secs / 60, secs % 60)
+        } else {
+            format!("{}s", secs)
+        };
+        let loading = Paragraph::new(Line::from(vec![
+            Span::styled(format!(" {} ", spinner), Style::default().fg(Color::Yellow)),
+            Span::styled("Sending request... ", Style::default().fg(Color::Yellow)),
+            Span::styled(timer, Style::default().fg(Color::DarkGray)),
+        ]));
         frame.render_widget(loading, inner);
         return;
     }
@@ -96,6 +106,13 @@ fn draw_response(frame: &mut Frame, resp: &Response, area: Rect, scroll: usize) 
         ),
     ]);
     frame.render_widget(Paragraph::new(status_line), chunks[0]);
+
+    // Separator line
+    let sep = Paragraph::new(Line::from(Span::styled(
+        "─".repeat(area.width as usize),
+        Style::default().fg(Color::DarkGray),
+    )));
+    frame.render_widget(sep, chunks[1]);
 
     // Body with syntax highlighting
     let body_lines = highlight_json(&resp.body);

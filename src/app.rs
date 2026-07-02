@@ -46,6 +46,7 @@ pub struct App {
     pub editing: Option<EditingField>,
     pub response: Option<Result<http::Response, String>>,
     pub loading: bool,
+    pub loading_since: std::time::Instant,
     pub tick: usize,
     pub response_scroll: usize,
     // Status message (for copy/export feedback)
@@ -88,6 +89,7 @@ impl App {
             editing: None,
             response: None,
             loading: false,
+            loading_since: std::time::Instant::now(),
             tick: 0,
             response_scroll: 0,
             status_message: None,
