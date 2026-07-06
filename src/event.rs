@@ -1,7 +1,7 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::mpsc;
 
-use crate::app::{App, Dialog, EditingField, Panel, RequestTab};
+use crate::app::{App, Dialog, EditingField, Panel};
 use crate::http;
 use crate::http::models::RequestModel;
 use crate::storage::collections::{self, Collection, SavedRequest};
@@ -38,17 +38,25 @@ fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<(SavedRequest, 
 
         // Send request: Ctrl+R (with interpolation)
         (KeyModifiers::CONTROL, KeyCode::Char('r')) => {
-            if !app.loading && !app.request.url.is_empty() {
-                app.loading = true;
-                app.loading_since = std::time::Instant::now();
-                let interpolated = interpolate_request(&app.request, &app.environments);
-                let saved = SavedRequest::from_model("", &app.request);
-                let tx = tx.clone();
-                let client = client.clone();
-                tokio::spawn(async move {
-                    let result = http::send_request(&interpolated, &client).await;
-                    let _ = tx.send((saved, result)).await;
-                });
+            if !app.loading {
+                // Sync cURL text to model if not empty
+                if !app.curl_text.trim().is_empty() {
+                    if let Some(parsed) = crate::http::curl_parser::parse_curl(&app.curl_text) {
+                        app.request = parsed;
+                    }
+                }
+                if !app.request.url.is_empty() {
+                    app.loading = true;
+                    app.loading_since = std::time::Instant::now();
+                    let interpolated = interpolate_request(&app.request, &app.environments);
+                    let saved = SavedRequest::from_model("", &app.request);
+                    let tx = tx.clone();
+                    let client = client.clone();
+                    tokio::spawn(async move {
+                        let result = http::send_request(&interpolated, &client).await;
+                        let _ = tx.send((saved, result)).await;
+                    });
+                }
             }
         }
 
@@ -57,29 +65,17 @@ fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<(SavedRequest, 
             app.request.method = app.request.method.next();
         }
 
-        // Request editing shortcuts
-        (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
-            app.cursor_pos = app.request.url.len();
-            app.editing = Some(EditingField::Url);
-        }
-        (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
-            app.request_tab = RequestTab::Headers;
-            app.kv_row = 0;
-            let kv = &app.request.headers[0];
-            app.cursor_pos = format!("{}:{}", kv.key, kv.value).len();
-            app.editing = Some(EditingField::Headers);
-        }
-        (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
-            app.request_tab = RequestTab::Body;
-            app.cursor_pos = app.request.body.len();
+        // Edit request as cURL: Enter or i when in Request panel
+        (KeyModifiers::NONE, KeyCode::Enter) if app.active_panel == Panel::Request => {
+            // Sync model → curl text, then enter edit mode
+            app.curl_text = crate::http::curl_parser::to_curl(&app.request);
+            app.cursor_pos = app.curl_text.len();
             app.editing = Some(EditingField::Body);
         }
-        (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
-            app.request_tab = RequestTab::Params;
-            app.kv_row = 0;
-            let kv = &app.request.params[0];
-            app.cursor_pos = format!("{}={}", kv.key, kv.value).len();
-            app.editing = Some(EditingField::Params);
+        (KeyModifiers::NONE, KeyCode::Char('i')) if app.active_panel == Panel::Request => {
+            app.curl_text = crate::http::curl_parser::to_curl(&app.request);
+            app.cursor_pos = app.curl_text.len();
+            app.editing = Some(EditingField::Body);
         }
 
         // History popup: Ctrl+H
@@ -602,72 +598,65 @@ fn handle_editing(app: &mut App, key: KeyEvent) {
 fn handle_body_edit(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
-            // Beautify JSON on exit
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&app.request.body) {
-                if let Ok(pretty) = serde_json::to_string_pretty(&parsed) {
-                    app.request.body = pretty;
-                }
+            // Parse cURL back into request model
+            if let Some(parsed) = crate::http::curl_parser::parse_curl(&app.curl_text) {
+                app.request = parsed;
             }
             app.editing = None;
         }
         KeyCode::Enter => {
-            app.request.body.insert(app.cursor_pos, '\n');
+            app.curl_text.insert(app.cursor_pos, '\n');
             app.cursor_pos += '\n'.len_utf8();
         }
         KeyCode::Left => {
-            app.cursor_pos = prev_char_boundary(&app.request.body, app.cursor_pos);
+            app.cursor_pos = prev_char_boundary(&app.curl_text, app.cursor_pos);
         }
         KeyCode::Right => {
-            app.cursor_pos = next_char_boundary(&app.request.body, app.cursor_pos);
+            app.cursor_pos = next_char_boundary(&app.curl_text, app.cursor_pos);
         }
         KeyCode::Up => {
-            // Move cursor to same column on previous line
-            let (line_idx, col) = cursor_line_col(&app.request.body, app.cursor_pos);
+            let (line_idx, col) = cursor_line_col(&app.curl_text, app.cursor_pos);
             if line_idx > 0 {
-                app.cursor_pos = pos_from_line_col(&app.request.body, line_idx - 1, col);
+                app.cursor_pos = pos_from_line_col(&app.curl_text, line_idx - 1, col);
             }
         }
         KeyCode::Down => {
-            // Move cursor to same column on next line
-            let (line_idx, col) = cursor_line_col(&app.request.body, app.cursor_pos);
-            let line_count = app.request.body.split('\n').count();
+            let (line_idx, col) = cursor_line_col(&app.curl_text, app.cursor_pos);
+            let line_count = app.curl_text.split('\n').count();
             if line_idx < line_count - 1 {
-                app.cursor_pos = pos_from_line_col(&app.request.body, line_idx + 1, col);
+                app.cursor_pos = pos_from_line_col(&app.curl_text, line_idx + 1, col);
             }
         }
         KeyCode::Home => {
-            // Move to beginning of current line
-            let (line_idx, _) = cursor_line_col(&app.request.body, app.cursor_pos);
-            app.cursor_pos = pos_from_line_col(&app.request.body, line_idx, 0);
+            let (line_idx, _) = cursor_line_col(&app.curl_text, app.cursor_pos);
+            app.cursor_pos = pos_from_line_col(&app.curl_text, line_idx, 0);
         }
         KeyCode::End => {
-            // Move to end of current line
-            let (line_idx, _) = cursor_line_col(&app.request.body, app.cursor_pos);
-            let lines: Vec<&str> = app.request.body.split('\n').collect();
+            let (line_idx, _) = cursor_line_col(&app.curl_text, app.cursor_pos);
+            let lines: Vec<&str> = app.curl_text.split('\n').collect();
             let line_len = lines.get(line_idx).map(|l| l.len()).unwrap_or(0);
-            app.cursor_pos = pos_from_line_col(&app.request.body, line_idx, line_len);
+            app.cursor_pos = pos_from_line_col(&app.curl_text, line_idx, line_len);
         }
         KeyCode::Backspace => {
             if app.cursor_pos > 0 {
-                let prev = prev_char_boundary(&app.request.body, app.cursor_pos);
-                app.request.body.replace_range(prev..app.cursor_pos, "");
+                let prev = prev_char_boundary(&app.curl_text, app.cursor_pos);
+                app.curl_text.replace_range(prev..app.cursor_pos, "");
                 app.cursor_pos = prev;
             }
         }
         KeyCode::Delete => {
-            if app.cursor_pos < app.request.body.len() {
-                let next = next_char_boundary(&app.request.body, app.cursor_pos);
-                app.request.body.replace_range(app.cursor_pos..next, "");
+            if app.cursor_pos < app.curl_text.len() {
+                let next = next_char_boundary(&app.curl_text, app.cursor_pos);
+                app.curl_text.replace_range(app.cursor_pos..next, "");
             }
         }
         KeyCode::Char(c) => {
-            app.request.body.insert(app.cursor_pos, c);
+            app.curl_text.insert(app.cursor_pos, c);
             app.cursor_pos += c.len_utf8();
         }
         _ => {}
     }
 }
-
 /// Get (line_index, column) from a cursor position in text
 fn cursor_line_col(text: &str, pos: usize) -> (usize, usize) {
     let before = &text[..pos.min(text.len())];

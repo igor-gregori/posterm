@@ -1,3 +1,4 @@
+pub mod curl_parser;
 pub mod models;
 
 use std::time::{Duration, Instant};

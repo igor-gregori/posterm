@@ -12,13 +12,6 @@ pub enum Panel {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum RequestTab {
-    Headers,
-    Body,
-    Params,
-}
-
-#[derive(Clone, Copy, PartialEq)]
 pub enum EditingField {
     Url,
     Headers,
@@ -42,7 +35,6 @@ pub struct App {
     pub running: bool,
     pub active_panel: Panel,
     pub request: RequestModel,
-    pub request_tab: RequestTab,
     pub editing: Option<EditingField>,
     pub response: Option<Result<http::Response, String>>,
     pub loading: bool,
@@ -54,6 +46,8 @@ pub struct App {
     pub status_tick: usize,
     // cURL export
     pub curl_output: String,
+    // cURL editor mode
+    pub curl_text: String,
     // KV editor state
     pub kv_row: usize,
     // Collections
@@ -85,7 +79,6 @@ impl App {
             running: true,
             active_panel: Panel::Request,
             request: RequestModel::new(),
-            request_tab: RequestTab::Headers,
             editing: None,
             response: None,
             loading: false,
@@ -95,6 +88,7 @@ impl App {
             status_message: None,
             status_tick: 0,
             curl_output: String::new(),
+            curl_text: String::from("curl https://"),
             kv_row: 0,
             collections,
             sidebar_collection: 0,
