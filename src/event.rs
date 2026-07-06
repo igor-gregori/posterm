@@ -1,7 +1,7 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::mpsc;
 
-use crate::app::{App, Dialog, EditingField, Panel, RequestTab};
+use crate::app::{App, Dialog, EditingField, Panel};
 use crate::http;
 use crate::http::models::RequestModel;
 use crate::storage::collections::{self, Collection, SavedRequest};
@@ -63,22 +63,29 @@ fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<(SavedRequest, 
             app.editing = Some(EditingField::Url);
         }
         (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
-            app.request_tab = RequestTab::Headers;
             app.kv_row = 0;
             let kv = &app.request.headers[0];
-            app.cursor_pos = format!("{}:{}", kv.key, kv.value).len();
+            let display = if kv.key.is_empty() && kv.value.is_empty() {
+                String::new()
+            } else {
+                format!("{}: {}", kv.key, kv.value)
+            };
+            app.cursor_pos = display.len();
             app.editing = Some(EditingField::Headers);
         }
         (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
-            app.request_tab = RequestTab::Body;
             app.cursor_pos = app.request.body.len();
             app.editing = Some(EditingField::Body);
         }
         (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
-            app.request_tab = RequestTab::Params;
             app.kv_row = 0;
             let kv = &app.request.params[0];
-            app.cursor_pos = format!("{}={}", kv.key, kv.value).len();
+            let display = if kv.key.is_empty() && kv.value.is_empty() {
+                String::new()
+            } else {
+                format!("{}={}", kv.key, kv.value)
+            };
+            app.cursor_pos = display.len();
             app.editing = Some(EditingField::Params);
         }
 
@@ -602,11 +609,15 @@ fn handle_editing(app: &mut App, key: KeyEvent) {
 fn handle_body_edit(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
+            // Convert single quotes to double quotes for JSON compatibility
+            let body = fix_json_quotes(&app.request.body);
             // Beautify JSON on exit
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&app.request.body) {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) {
                 if let Ok(pretty) = serde_json::to_string_pretty(&parsed) {
                     app.request.body = pretty;
                 }
+            } else {
+                app.request.body = body;
             }
             app.editing = None;
         }
@@ -737,38 +748,63 @@ fn handle_text_edit(
 }
 
 fn handle_kv_edit(app: &mut App, key: KeyEvent, is_headers: bool) {
-    let sep = if is_headers { ":" } else { "=" };
+    let sep = if is_headers { ": " } else { "=" };
     let items = if is_headers { &app.request.headers } else { &app.request.params };
     let len = items.len();
 
-    // Build the inline string for current row
+    // Build the inline string: raw text as the user typed it
     let inline = {
         let kv = &items[app.kv_row];
-        format!("{}{}{}", kv.key, sep, kv.value)
+        if kv.key.is_empty() && kv.value.is_empty() {
+            String::new()
+        } else if kv.value.is_empty() {
+            // Might be a raw string without separator yet
+            kv.key.clone()
+        } else {
+            format!("{}{}{}", kv.key, sep, kv.value)
+        }
     };
+
+    // Clamp cursor to inline length
+    if app.cursor_pos > inline.len() {
+        app.cursor_pos = inline.len();
+    }
 
     match key.code {
         KeyCode::Esc => {
-            // Sync current inline back before exiting
-            sync_kv_from_cursor(app, is_headers, sep);
+            validate_and_save_kv(app, is_headers, sep);
             app.editing = None;
         }
         KeyCode::Up if app.kv_row > 0 => {
-            sync_kv_from_cursor(app, is_headers, sep);
+            validate_and_save_kv(app, is_headers, sep);
             app.kv_row -= 1;
             let items = if is_headers { &app.request.headers } else { &app.request.params };
-            let new_inline = format!("{}{}{}", items[app.kv_row].key, sep, items[app.kv_row].value);
+            let kv = &items[app.kv_row];
+            let new_inline = if kv.key.is_empty() && kv.value.is_empty() {
+                String::new()
+            } else if kv.value.is_empty() {
+                kv.key.clone()
+            } else {
+                format!("{}{}{}", kv.key, sep, kv.value)
+            };
             app.cursor_pos = new_inline.len();
         }
         KeyCode::Down if app.kv_row < len.saturating_sub(1) => {
-            sync_kv_from_cursor(app, is_headers, sep);
+            validate_and_save_kv(app, is_headers, sep);
             app.kv_row += 1;
             let items = if is_headers { &app.request.headers } else { &app.request.params };
-            let new_inline = format!("{}{}{}", items[app.kv_row].key, sep, items[app.kv_row].value);
+            let kv = &items[app.kv_row];
+            let new_inline = if kv.key.is_empty() && kv.value.is_empty() {
+                String::new()
+            } else if kv.value.is_empty() {
+                kv.key.clone()
+            } else {
+                format!("{}{}{}", kv.key, sep, kv.value)
+            };
             app.cursor_pos = new_inline.len();
         }
         KeyCode::Enter => {
-            sync_kv_from_cursor(app, is_headers, sep);
+            validate_and_save_kv(app, is_headers, sep);
             // Add new row
             let items = if is_headers { &mut app.request.headers } else { &mut app.request.params };
             items.push(crate::http::models::KeyValue {
@@ -824,27 +860,47 @@ fn handle_kv_edit(app: &mut App, key: KeyEvent, is_headers: bool) {
 }
 
 /// Sync the inline string back into the KeyValue struct by splitting on separator
-fn sync_kv_from_cursor(app: &mut App, is_headers: bool, sep: &str) {
+/// Validate and save the current KV row. If no separator found, mark as invalid (store all in key).
+fn validate_and_save_kv(app: &mut App, is_headers: bool, sep: &str) {
     let items = if is_headers { &mut app.request.headers } else { &mut app.request.params };
     let kv = &items[app.kv_row];
-    let inline = format!("{}{}{}", kv.key, sep, kv.value);
-    let (key, value) = split_kv(&inline, sep);
+
+    // Reconstruct what the user has typed
+    let raw = if kv.key.is_empty() && kv.value.is_empty() {
+        return; // nothing to validate
+    } else if kv.value.is_empty() {
+        kv.key.clone()
+    } else {
+        format!("{}{}{}", kv.key, sep, kv.value)
+    };
+
+    // Parse it
+    let (key, value) = split_kv(&raw, sep);
     items[app.kv_row].key = key;
     items[app.kv_row].value = value;
 }
 
-/// Write an inline string back into the KV struct
-fn write_inline(app: &mut App, is_headers: bool, sep: &str, inline: &str) {
+/// Write an inline string back into the KV struct RAW (no split during editing)
+fn write_inline(app: &mut App, is_headers: bool, _sep: &str, inline: &str) {
     let items = if is_headers { &mut app.request.headers } else { &mut app.request.params };
-    let (key, value) = split_kv(inline, sep);
-    items[app.kv_row].key = key;
-    items[app.kv_row].value = value;
+    // Store everything in key during editing, value stays empty
+    // validate_and_save_kv will properly split when focus is lost
+    items[app.kv_row].key = inline.to_string();
+    items[app.kv_row].value = String::new();
 }
 
 /// Split "key<sep>value" into (key, value). If no separator, all goes to key.
+/// For headers (sep=": "), also tries splitting on just ":" and trims value.
 fn split_kv(s: &str, sep: &str) -> (String, String) {
     if let Some(pos) = s.find(sep) {
         (s[..pos].to_string(), s[pos + sep.len()..].to_string())
+    } else if sep == ": " {
+        // Fallback: try splitting on just ':' for headers like "key:value"
+        if let Some(pos) = s.find(':') {
+            (s[..pos].to_string(), s[pos + 1..].trim_start().to_string())
+        } else {
+            (s.to_string(), String::new())
+        }
     } else {
         (s.to_string(), String::new())
     }
@@ -904,4 +960,105 @@ fn next_char_boundary(s: &str, pos: usize) -> usize {
         p += 1;
     }
     p
+}
+
+/// Fix informal JSON: convert single quotes to double, add quotes to unquoted keys
+/// e.g. {title: 'foo', count: 1} → {"title": "foo", "count": 1}
+fn fix_json_quotes(input: &str) -> String {
+    // First: replace single quotes with double quotes
+    let with_double_quotes = replace_single_quotes(input);
+
+    // If it parses now, we're done
+    if serde_json::from_str::<serde_json::Value>(&with_double_quotes).is_ok() {
+        return with_double_quotes;
+    }
+
+    // Second: try to quote unquoted keys (JS-style)
+    let fixed = quote_unquoted_keys(&with_double_quotes);
+
+    // If it still doesn't parse, return what we have
+    fixed
+}
+
+/// Replace single quotes with double quotes (outside of existing double-quoted strings)
+fn replace_single_quotes(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut in_double_quote = false;
+
+    for c in input.chars() {
+        if c == '"' {
+            in_double_quote = !in_double_quote;
+            result.push(c);
+        } else if c == '\'' && !in_double_quote {
+            result.push('"');
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
+}
+
+/// Add double quotes around unquoted object keys
+/// Handles patterns like: { key: value } → { "key": value }
+fn quote_unquoted_keys(input: &str) -> String {
+    let mut result = String::with_capacity(input.len() + 32);
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        let c = chars[i];
+
+        if c == '"' {
+            // Skip quoted string
+            result.push(c);
+            i += 1;
+            while i < len && chars[i] != '"' {
+                if chars[i] == '\\' {
+                    result.push(chars[i]);
+                    i += 1;
+                    if i < len {
+                        result.push(chars[i]);
+                        i += 1;
+                    }
+                } else {
+                    result.push(chars[i]);
+                    i += 1;
+                }
+            }
+            if i < len {
+                result.push(chars[i]); // closing "
+                i += 1;
+            }
+        } else if c.is_alphabetic() || c == '_' || c == '$' {
+            // Could be an unquoted key — check if followed by ':'
+            let start = i;
+            while i < len && (chars[i].is_alphanumeric() || chars[i] == '_' || chars[i] == '$' || chars[i] == '-') {
+                i += 1;
+            }
+            let word: String = chars[start..i].iter().collect();
+
+            // Skip whitespace to see if next is ':'
+            let mut j = i;
+            while j < len && chars[j] == ' ' {
+                j += 1;
+            }
+
+            if j < len && chars[j] == ':' {
+                // It's an unquoted key — add quotes
+                result.push('"');
+                result.push_str(&word);
+                result.push('"');
+            } else {
+                // Not a key, just a value like true/false/null
+                result.push_str(&word);
+            }
+        } else {
+            result.push(c);
+            i += 1;
+        }
+    }
+
+    result
 }

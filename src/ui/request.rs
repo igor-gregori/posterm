@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, EditingField, Panel, RequestTab};
+use crate::app::{App, EditingField, Panel};
 
 pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let is_active = app.active_panel == Panel::Request;
@@ -28,32 +28,44 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Compute dynamic heights
+    let header_lines = app.request.headers.len().max(1);
+    let param_lines = app.request.params.len().max(1);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // method + url
-            Constraint::Length(1), // separator
-            Constraint::Length(1), // tabs
-            Constraint::Length(1), // tab underline
-            Constraint::Min(1),   // tab content
+            Constraint::Length(1),                    // method + url
+            Constraint::Length(1),                    // separator
+            Constraint::Length(1),                    // headers label
+            Constraint::Length(header_lines as u16),  // headers
+            Constraint::Length(1),                    // separator
+            Constraint::Length(1),                    // params label
+            Constraint::Length(param_lines as u16),   // params
+            Constraint::Length(1),                    // separator
+            Constraint::Length(1),                    // body label
+            Constraint::Min(1),                      // body
         ])
         .split(inner);
 
     draw_method_url(frame, app, chunks[0]);
-    // separator line
+    draw_separator(frame, chunks[1]);
+    draw_label(frame, "Headers", EditingField::Headers, app, chunks[2]);
+    draw_kv_section(frame, app, chunks[3], &app.request.headers, EditingField::Headers, app.placeholder_header);
+    draw_separator(frame, chunks[4]);
+    draw_label(frame, "Params", EditingField::Params, app, chunks[5]);
+    draw_kv_section(frame, app, chunks[6], &app.request.params, EditingField::Params, app.placeholder_param);
+    draw_separator(frame, chunks[7]);
+    draw_label(frame, "Body", EditingField::Body, app, chunks[8]);
+    draw_body(frame, app, chunks[9]);
+}
+
+fn draw_separator(frame: &mut Frame, area: Rect) {
     let sep = Paragraph::new(Line::from(Span::styled(
-        "─".repeat(chunks[1].width as usize),
+        "─".repeat(area.width as usize),
         Style::default().fg(Color::DarkGray),
     )));
-    frame.render_widget(sep, chunks[1]);
-    draw_tabs(frame, app, chunks[2]);
-    // tab underline
-    let underline = Paragraph::new(Line::from(Span::styled(
-        "─".repeat(chunks[3].width as usize),
-        Style::default().fg(Color::DarkGray),
-    )));
-    frame.render_widget(underline, chunks[3]);
-    draw_tab_content(frame, app, chunks[4]);
+    frame.render_widget(sep, area);
 }
 
 fn draw_method_url(frame: &mut Frame, app: &App, area: Rect) {
@@ -64,130 +76,104 @@ fn draw_method_url(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     let method_color = method_color(app.request.method.as_str());
-    let method_style = Style::default().fg(method_color).add_modifier(Modifier::BOLD);
-    let method = Paragraph::new(Span::styled(
-        format!(" {} ", app.request.method.as_str()),
-        method_style,
-    ));
-    frame.render_widget(method, chunks[0]);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            format!(" {} ", app.request.method.as_str()),
+            Style::default().fg(method_color).add_modifier(Modifier::BOLD),
+        )),
+        chunks[0],
+    );
 
-    let editing_url = app.editing == Some(EditingField::Url);
-    if editing_url {
+    if app.editing == Some(EditingField::Url) {
         let line = render_text_with_cursor(&app.request.url, app.cursor_pos, Color::White);
         frame.render_widget(Paragraph::new(line), chunks[1]);
     } else {
-        let (url_text, url_style) = if app.request.url.is_empty() {
-            ("https://...", Style::default().fg(Color::DarkGray))
+        let (text, style) = if app.request.url.is_empty() {
+            ("https://api.example.com/endpoint", Style::default().fg(Color::DarkGray))
         } else {
             (app.request.url.as_str(), Style::default().fg(Color::White))
         };
-        frame.render_widget(Paragraph::new(Span::styled(url_text, url_style)), chunks[1]);
+        frame.render_widget(Paragraph::new(Span::styled(text, style)), chunks[1]);
     }
 }
 
-fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
-    let titles = ["Headers", "Body", "Params"];
-    let selected = match app.request_tab {
-        RequestTab::Headers => 0,
-        RequestTab::Body => 1,
-        RequestTab::Params => 2,
+fn draw_label(frame: &mut Frame, label: &str, field: EditingField, app: &App, area: Rect) {
+    let is_editing = app.editing == Some(field);
+    let style = if is_editing {
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
     };
-
-    let is_editing_tab = matches!(
-        app.editing,
-        Some(EditingField::Headers) | Some(EditingField::Body) | Some(EditingField::Params)
-    );
-
-    // Split area into 2 rows: tabs (1) + underline (1)
-    let tab_area = Rect { height: 1, ..area };
-
-    let width = area.width as usize;
-    let tab_width = width / 3;
-    let mut spans: Vec<Span> = Vec::new();
-
-    for (i, title) in titles.iter().enumerate() {
-        let is_selected = i == selected;
-        let padded = format!("{:^w$}", title, w = tab_width);
-
-        let style = if is_selected && is_editing_tab {
-            Style::default().fg(Color::Black).bg(Color::White).add_modifier(Modifier::BOLD)
-        } else if is_selected {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-
-        spans.push(Span::styled(padded, style));
-    }
-
-    frame.render_widget(Paragraph::new(Line::from(spans)), tab_area);
+    frame.render_widget(Paragraph::new(Span::styled(format!(" {}", label), style)), area);
 }
 
-fn draw_tab_content(frame: &mut Frame, app: &App, area: Rect) {
-    match app.request_tab {
-        RequestTab::Headers => draw_kv_editor(frame, app, area, &app.request.headers, EditingField::Headers, ":"),
-        RequestTab::Body => draw_body(frame, app, area),
-        RequestTab::Params => draw_kv_editor(frame, app, area, &app.request.params, EditingField::Params, "="),
-    }
-}
-
-fn draw_kv_editor(
+fn draw_kv_section(
     frame: &mut Frame,
     app: &App,
     area: Rect,
     items: &[crate::http::models::KeyValue],
     field: EditingField,
-    separator: &str,
+    placeholder: &str,
 ) {
     let is_editing = app.editing == Some(field);
+    let sep = if field == EditingField::Headers { ": " } else { "=" };
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, kv) in items.iter().enumerate() {
         let is_active_row = is_editing && i == app.kv_row;
-        let display = format!("{}{}{}", kv.key, separator, kv.value);
+        let is_empty = kv.key.is_empty() && kv.value.is_empty();
+        // Invalid: has text in key but no value (separator not found)
+        let is_invalid = !kv.key.is_empty() && kv.value.is_empty() && {
+            let check_sep = if field == EditingField::Headers { ":" } else { "=" };
+            !kv.key.contains(check_sep)
+        };
 
         if is_active_row {
-            let line = render_kv_line_with_cursor("› ", &display, app.cursor_pos);
-            lines.push(line);
-        } else if display == separator {
+            // Build display from raw content
+            let display = if is_empty {
+                String::new()
+            } else if kv.value.is_empty() {
+                kv.key.clone()
+            } else {
+                format!("{}{}{}", kv.key, sep, kv.value)
+            };
+            lines.push(render_kv_line_with_cursor(&display, app.cursor_pos));
+        } else if is_empty {
             lines.push(Line::from(Span::styled(
-                format!("  key{}value", separator),
+                format!("   {}", placeholder),
                 Style::default().fg(Color::DarkGray),
             )));
+        } else if is_invalid {
+            // Show in red with hint
+            let display = format!("   {} ⚠", kv.key);
+            lines.push(Line::from(Span::styled(
+                display,
+                Style::default().fg(Color::Red),
+            )));
         } else {
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(display, Style::default().fg(Color::White)),
-            ]));
+            let display = format!("   {}{}{}", kv.key, sep, kv.value);
+            lines.push(Line::from(Span::styled(
+                display,
+                Style::default().fg(Color::White),
+            )));
         }
     }
 
-    if !is_editing {
-        // Show hint when not editing
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            format!("  Ctrl+{} to edit", if separator == ":" { "D" } else { "P" }),
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
-
-    let paragraph = Paragraph::new(lines);
-    frame.render_widget(paragraph, area);
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
-    let is_editing = app.editing == Some(EditingField::Body);
-
-    if is_editing {
+    if app.editing == Some(EditingField::Body) {
         let lines = render_multiline_with_cursor(&app.request.body, app.cursor_pos);
         frame.render_widget(Paragraph::new(lines), area);
     } else if app.request.body.is_empty() {
-        let lines = vec![
-            Line::from(Span::styled("  { ... }", Style::default().fg(Color::DarkGray))),
-            Line::from(""),
-            Line::from(Span::styled("  Ctrl+B to edit", Style::default().fg(Color::DarkGray))),
-        ];
-        frame.render_widget(Paragraph::new(lines), area);
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "   { \"message\": \"hello world\" }",
+                Style::default().fg(Color::DarkGray),
+            )),
+            area,
+        );
     } else {
         let lines = highlight_json_body(&app.request.body);
         frame.render_widget(Paragraph::new(lines), area);
@@ -237,7 +223,48 @@ fn method_color(method: &str) -> Color {
     }
 }
 
-/// Renders multiline text with a block cursor at the given position
+fn render_text_with_cursor(text: &str, cursor_pos: usize, color: Color) -> Line<'static> {
+    let pos = snap_to_char_boundary(text, cursor_pos);
+    let (before, after) = text.split_at(pos);
+
+    if after.is_empty() {
+        Line::from(vec![
+            Span::styled(before.to_string(), Style::default().fg(color)),
+            Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)),
+        ])
+    } else {
+        let ch = after.chars().next().unwrap();
+        let ch_len = ch.len_utf8();
+        Line::from(vec![
+            Span::styled(before.to_string(), Style::default().fg(color)),
+            Span::styled(after[..ch_len].to_string(), Style::default().fg(Color::Black).bg(Color::White)),
+            Span::styled(after[ch_len..].to_string(), Style::default().fg(color)),
+        ])
+    }
+}
+
+fn render_kv_line_with_cursor(display: &str, cursor_pos: usize) -> Line<'static> {
+    let pos = snap_to_char_boundary(display, cursor_pos);
+    let (before, after) = display.split_at(pos);
+
+    let mut spans = vec![
+        Span::styled(" › ", Style::default().fg(Color::Cyan)),
+    ];
+
+    if after.is_empty() {
+        spans.push(Span::styled(before.to_string(), Style::default().fg(Color::White)));
+        spans.push(Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)));
+    } else {
+        let ch = after.chars().next().unwrap();
+        let ch_len = ch.len_utf8();
+        spans.push(Span::styled(before.to_string(), Style::default().fg(Color::White)));
+        spans.push(Span::styled(after[..ch_len].to_string(), Style::default().fg(Color::Black).bg(Color::White)));
+        spans.push(Span::styled(after[ch_len..].to_string(), Style::default().fg(Color::White)));
+    }
+
+    Line::from(spans)
+}
+
 fn render_multiline_with_cursor(text: &str, cursor_pos: usize) -> Vec<Line<'static>> {
     let pos = snap_to_char_boundary(text, cursor_pos);
     let before_cursor = &text[..pos];
@@ -276,51 +303,6 @@ fn render_multiline_with_cursor(text: &str, cursor_pos: usize) -> Vec<Line<'stat
     result
 }
 
-/// Renders text with a block cursor (inverted colors at cursor position)
-fn render_text_with_cursor(text: &str, cursor_pos: usize, color: Color) -> Line<'static> {
-    let pos = snap_to_char_boundary(text, cursor_pos);
-    let (before, after) = text.split_at(pos);
-
-    if after.is_empty() {
-        Line::from(vec![
-            Span::styled(before.to_string(), Style::default().fg(color)),
-            Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)),
-        ])
-    } else {
-        let ch = after.chars().next().unwrap();
-        let ch_len = ch.len_utf8();
-        Line::from(vec![
-            Span::styled(before.to_string(), Style::default().fg(color)),
-            Span::styled(after[..ch_len].to_string(), Style::default().fg(Color::Black).bg(Color::White)),
-            Span::styled(after[ch_len..].to_string(), Style::default().fg(color)),
-        ])
-    }
-}
-
-/// Renders a KV line with cursor in the inline display
-fn render_kv_line_with_cursor(marker: &str, display: &str, cursor_pos: usize) -> Line<'static> {
-    let pos = snap_to_char_boundary(display, cursor_pos);
-    let (before, after) = display.split_at(pos);
-
-    let mut spans = vec![
-        Span::styled(marker.to_string(), Style::default().fg(Color::Cyan)),
-    ];
-
-    if after.is_empty() {
-        spans.push(Span::styled(before.to_string(), Style::default().fg(Color::White)));
-        spans.push(Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)));
-    } else {
-        let ch = after.chars().next().unwrap();
-        let ch_len = ch.len_utf8();
-        spans.push(Span::styled(before.to_string(), Style::default().fg(Color::White)));
-        spans.push(Span::styled(after[..ch_len].to_string(), Style::default().fg(Color::Black).bg(Color::White)));
-        spans.push(Span::styled(after[ch_len..].to_string(), Style::default().fg(Color::White)));
-    }
-
-    Line::from(spans)
-}
-
-/// Snap a byte position to the nearest valid char boundary (rounding down)
 fn snap_to_char_boundary(s: &str, pos: usize) -> usize {
     let pos = pos.min(s.len());
     if s.is_char_boundary(pos) {
