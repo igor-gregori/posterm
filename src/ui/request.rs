@@ -85,7 +85,9 @@ fn draw_method_url(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     if app.editing == Some(EditingField::Url) {
-        let line = render_text_with_cursor(&app.request.url, app.cursor_pos, Color::White);
+        // Horizontal scroll: show portion of URL around cursor
+        let available_width = chunks[1].width as usize;
+        let line = render_text_with_cursor_scroll(&app.request.url, app.cursor_pos, Color::White, available_width);
         frame.render_widget(Paragraph::new(line), chunks[1]);
     } else {
         let (text, style) = if app.request.url.is_empty() {
@@ -93,7 +95,13 @@ fn draw_method_url(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             (app.request.url.as_str(), Style::default().fg(Color::White))
         };
-        frame.render_widget(Paragraph::new(Span::styled(text, style)), chunks[1]);
+        // Truncate display if too long
+        let display = if text.len() > chunks[1].width as usize && chunks[1].width > 3 {
+            format!("{}…", &text[..chunks[1].width as usize - 1])
+        } else {
+            text.to_string()
+        };
+        frame.render_widget(Paragraph::new(Span::styled(display, style)), chunks[1]);
     }
 }
 
@@ -221,6 +229,29 @@ fn method_color(method: &str) -> Color {
         "PATCH" => Color::Magenta,
         _ => Color::White,
     }
+}
+
+/// Renders single-line text with cursor, scrolled horizontally to keep cursor visible
+fn render_text_with_cursor_scroll(text: &str, cursor_pos: usize, color: Color, width: usize) -> Line<'static> {
+    let pos = snap_to_char_boundary(text, cursor_pos);
+
+    if text.len() <= width {
+        // Fits entirely — no scroll needed
+        return render_text_with_cursor(text, cursor_pos, color);
+    }
+
+    // Calculate visible window around cursor
+    let half = width / 2;
+    let start = if pos > half { pos - half } else { 0 };
+    let end = (start + width).min(text.len());
+    let start = if end == text.len() && text.len() > width { text.len() - width } else { start };
+
+    // Snap start to char boundary
+    let start = snap_to_char_boundary(text, start);
+    let visible = &text[start..snap_to_char_boundary(text, end)];
+    let cursor_in_visible = pos - start;
+
+    render_text_with_cursor(visible, cursor_in_visible, color)
 }
 
 fn render_text_with_cursor(text: &str, cursor_pos: usize, color: Color) -> Line<'static> {
