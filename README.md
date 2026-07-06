@@ -14,7 +14,7 @@ cargo install --git https://github.com/igor-gregori/posterm.git
 
 Download from [GitHub Releases](https://github.com/igor-gregori/posterm/releases/latest):
 
-- **Linux** — `posterm-x86_64-unknown-linux-gnu.tar.gz`
+- **Linux** — `posterm-x86_64-unknown-linux-musl.tar.gz`
 - **macOS (Intel)** — `posterm-x86_64-apple-darwin.tar.gz`
 - **macOS (Apple Silicon)** — `posterm-aarch64-apple-darwin.tar.gz`
 - **Windows** — `posterm-x86_64-pc-windows-msvc.zip`
