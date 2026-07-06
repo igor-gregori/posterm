@@ -55,17 +55,18 @@ fn draw_text_input(frame: &mut Frame, app: &App, dialog: Dialog) {
     frame.render_widget(block, area);
 
     let pos = app.cursor_pos.min(app.dialog_input.len());
-    let (before, after) = app.dialog_input.split_at(pos);
 
     let line = Line::from(vec![
         Span::styled("Name: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(before, Style::default().fg(Color::White)),
-        Span::styled("▌", Style::default().fg(Color::Cyan)),
-        Span::styled(after, Style::default().fg(Color::White)),
+        Span::styled(&app.dialog_input, Style::default().fg(Color::White)),
     ]);
 
     let paragraph = Paragraph::new(line);
     frame.render_widget(paragraph, inner);
+
+    // Set native cursor position
+    let cursor_x = inner.x + 6 + pos as u16; // 6 = "Name: ".len()
+    frame.set_cursor_position(ratatui::layout::Position { x: cursor_x, y: inner.y });
 }
 
 fn draw_select_env(frame: &mut Frame, app: &App) {
@@ -153,6 +154,7 @@ fn draw_edit_env_vars(frame: &mut Frame, app: &App) {
     frame.render_widget(block, area);
 
     let mut lines: Vec<Line> = Vec::new();
+    let mut cursor_xy: Option<(u16, u16)> = None;
 
     for (i, (key, value)) in app.env_edit_vars.iter().enumerate() {
         let is_active_row = i == app.env_edit_row;
@@ -160,7 +162,13 @@ fn draw_edit_env_vars(frame: &mut Frame, app: &App) {
         let row_marker = if is_active_row { "› " } else { "  " };
 
         if is_active_row {
-            lines.push(render_env_line_with_cursor(row_marker, &display, app.cursor_pos));
+            let pos = app.cursor_pos.min(display.len());
+            lines.push(Line::from(vec![
+                Span::styled(row_marker.to_string(), Style::default().fg(Color::Cyan)),
+                Span::styled(display.clone(), Style::default().fg(Color::White)),
+            ]));
+            // cursor: inner.x + 2 (marker) + pos
+            cursor_xy = Some((inner.x + 2 + pos as u16, inner.y + i as u16));
         } else if display == "=" {
             lines.push(Line::from(vec![
                 Span::styled(row_marker.to_string(), Style::default().fg(Color::Cyan)),
@@ -176,43 +184,11 @@ fn draw_edit_env_vars(frame: &mut Frame, app: &App) {
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner);
-}
 
-fn render_env_line_with_cursor(marker: &str, display: &str, cursor_pos: usize) -> Line<'static> {
-    let pos = snap_to_char_boundary(display, cursor_pos);
-    let (before, after) = display.split_at(pos);
-
-    let mut spans = vec![
-        Span::styled(marker.to_string(), Style::default().fg(Color::Cyan)),
-    ];
-
-    if after.is_empty() {
-        spans.push(Span::styled(before.to_string(), Style::default().fg(Color::White)));
-        spans.push(Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)));
-    } else {
-        let ch = after.chars().next().unwrap();
-        let ch_len = ch.len_utf8();
-        let cursor_char = &after[..ch_len];
-        let rest = &after[ch_len..];
-        spans.push(Span::styled(before.to_string(), Style::default().fg(Color::White)));
-        spans.push(Span::styled(cursor_char.to_string(), Style::default().fg(Color::Black).bg(Color::White)));
-        spans.push(Span::styled(rest.to_string(), Style::default().fg(Color::White)));
+    // Set native cursor
+    if let Some((x, y)) = cursor_xy {
+        frame.set_cursor_position(ratatui::layout::Position { x, y });
     }
-
-    Line::from(spans)
-}
-
-/// Snap a byte position to the nearest valid char boundary (rounding down)
-fn snap_to_char_boundary(s: &str, pos: usize) -> usize {
-    let pos = pos.min(s.len());
-    if s.is_char_boundary(pos) {
-        return pos;
-    }
-    let mut p = pos;
-    while p > 0 && !s.is_char_boundary(p) {
-        p -= 1;
-    }
-    p
 }
 
 fn draw_curl_export(frame: &mut Frame, app: &App) {

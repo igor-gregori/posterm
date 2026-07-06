@@ -45,8 +45,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
     // Render panels
     sidebar::draw(frame, app, sidebar_split[0]);
     draw_shortcuts_panel(frame, app, sidebar_split[1]);
-    request::draw(frame, app, right_panels[0]);
+    let cursor_pos = request::draw(frame, app, right_panels[0]);
     response::draw(frame, app, right_panels[1]);
+
+    // Set native terminal cursor if editing
+    if let Some((x, y)) = cursor_pos {
+        frame.set_cursor_position(ratatui::layout::Position { x, y });
+    }
 
     // Dialog overlay (on top of everything)
     dialog::draw(frame, app);

@@ -8,7 +8,8 @@ use ratatui::{
 
 use crate::app::{App, EditingField, Panel};
 
-pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
+/// Draw request panel and return cursor position (x, y) if editing
+pub fn draw(frame: &mut Frame, app: &App, area: Rect) -> Option<(u16, u16)> {
     let is_active = app.active_panel == Panel::Request;
 
     let active_color = app.environments.active_env()
@@ -48,16 +49,21 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
         ])
         .split(inner);
 
-    draw_method_url(frame, app, chunks[0]);
+    let mut cursor_pos_xy: Option<(u16, u16)> = None;
+
+    // URL
+    cursor_pos_xy = cursor_pos_xy.or(draw_method_url(frame, app, chunks[0]));
     draw_separator(frame, chunks[1]);
     draw_label(frame, "Headers", EditingField::Headers, app, chunks[2]);
-    draw_kv_section(frame, app, chunks[3], &app.request.headers, EditingField::Headers, app.placeholder_header);
+    cursor_pos_xy = cursor_pos_xy.or(draw_kv_section(frame, app, chunks[3], &app.request.headers, EditingField::Headers, app.placeholder_header));
     draw_separator(frame, chunks[4]);
     draw_label(frame, "Params", EditingField::Params, app, chunks[5]);
-    draw_kv_section(frame, app, chunks[6], &app.request.params, EditingField::Params, app.placeholder_param);
+    cursor_pos_xy = cursor_pos_xy.or(draw_kv_section(frame, app, chunks[6], &app.request.params, EditingField::Params, app.placeholder_param));
     draw_separator(frame, chunks[7]);
     draw_label(frame, "Body", EditingField::Body, app, chunks[8]);
-    draw_body(frame, app, chunks[9]);
+    cursor_pos_xy = cursor_pos_xy.or(draw_body(frame, app, chunks[9]));
+
+    cursor_pos_xy
 }
 
 fn draw_separator(frame: &mut Frame, area: Rect) {
@@ -68,7 +74,7 @@ fn draw_separator(frame: &mut Frame, area: Rect) {
     frame.render_widget(sep, area);
 }
 
-fn draw_method_url(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_method_url(frame: &mut Frame, app: &App, area: Rect) -> Option<(u16, u16)> {
     let method_width = 8u16;
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -85,23 +91,26 @@ fn draw_method_url(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     if app.editing == Some(EditingField::Url) {
-        // Horizontal scroll: show portion of URL around cursor
         let available_width = chunks[1].width as usize;
-        let line = render_text_with_cursor_scroll(&app.request.url, app.cursor_pos, Color::White, available_width);
-        frame.render_widget(Paragraph::new(line), chunks[1]);
+        let pos = app.cursor_pos.min(app.request.url.len());
+
+        // Horizontal scroll
+        let (visible, cursor_in_visible) = scroll_text(&app.request.url, pos, available_width);
+        frame.render_widget(
+            Paragraph::new(Span::styled(visible, Style::default().fg(Color::White))),
+            chunks[1],
+        );
+
+        Some((chunks[1].x + cursor_in_visible as u16, chunks[1].y))
     } else {
         let (text, style) = if app.request.url.is_empty() {
             ("https://api.example.com/endpoint", Style::default().fg(Color::DarkGray))
         } else {
             (app.request.url.as_str(), Style::default().fg(Color::White))
         };
-        // Truncate display if too long
-        let display = if text.len() > chunks[1].width as usize && chunks[1].width > 3 {
-            format!("{}…", &text[..chunks[1].width as usize - 1])
-        } else {
-            text.to_string()
-        };
+        let display = truncate(text, chunks[1].width as usize);
         frame.render_widget(Paragraph::new(Span::styled(display, style)), chunks[1]);
+        None
     }
 }
 
@@ -122,22 +131,21 @@ fn draw_kv_section(
     items: &[crate::http::models::KeyValue],
     field: EditingField,
     placeholder: &str,
-) {
+) -> Option<(u16, u16)> {
     let is_editing = app.editing == Some(field);
     let sep = if field == EditingField::Headers { ": " } else { "=" };
+    let mut cursor_xy: Option<(u16, u16)> = None;
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, kv) in items.iter().enumerate() {
         let is_active_row = is_editing && i == app.kv_row;
         let is_empty = kv.key.is_empty() && kv.value.is_empty();
-        // Invalid: has text in key but no value (separator not found)
         let is_invalid = !kv.key.is_empty() && kv.value.is_empty() && {
             let check_sep = if field == EditingField::Headers { ":" } else { "=" };
             !kv.key.contains(check_sep)
         };
 
         if is_active_row {
-            // Build display from raw content
             let display = if is_empty {
                 String::new()
             } else if kv.value.is_empty() {
@@ -145,35 +153,51 @@ fn draw_kv_section(
             } else {
                 format!("{}{}{}", kv.key, sep, kv.value)
             };
-            lines.push(render_kv_line_with_cursor(&display, app.cursor_pos));
+
+            let pos = app.cursor_pos.min(display.len());
+            lines.push(Line::from(vec![
+                Span::styled(" › ", Style::default().fg(Color::Cyan)),
+                Span::styled(display.clone(), Style::default().fg(Color::White)),
+            ]));
+            // Cursor position: area.x + 3 (for " › ") + cursor pos in text
+            cursor_xy = Some((area.x + 3 + pos as u16, area.y + i as u16));
         } else if is_empty {
             lines.push(Line::from(Span::styled(
                 format!("   {}", placeholder),
                 Style::default().fg(Color::DarkGray),
             )));
         } else if is_invalid {
-            // Show in red with hint
-            let display = format!("   {} ⚠", kv.key);
             lines.push(Line::from(Span::styled(
-                display,
+                format!("   {} ⚠", kv.key),
                 Style::default().fg(Color::Red),
             )));
         } else {
-            let display = format!("   {}{}{}", kv.key, sep, kv.value);
             lines.push(Line::from(Span::styled(
-                display,
+                format!("   {}{}{}", kv.key, sep, kv.value),
                 Style::default().fg(Color::White),
             )));
         }
     }
 
     frame.render_widget(Paragraph::new(lines), area);
+    cursor_xy
 }
 
-fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_body(frame: &mut Frame, app: &App, area: Rect) -> Option<(u16, u16)> {
     if app.editing == Some(EditingField::Body) {
-        let lines = render_multiline_with_cursor(&app.request.body, app.cursor_pos);
+        let pos = app.cursor_pos.min(app.request.body.len());
+        let before = &app.request.body[..pos];
+        let cursor_line = before.matches('\n').count();
+        let cursor_col = before.rfind('\n').map(|p| pos - p - 1).unwrap_or(pos);
+
+        // Render body as plain text
+        let lines: Vec<Line> = app.request.body
+            .split('\n')
+            .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(Color::White))))
+            .collect();
         frame.render_widget(Paragraph::new(lines), area);
+
+        Some((area.x + cursor_col as u16, area.y + cursor_line as u16))
     } else if app.request.body.is_empty() {
         frame.render_widget(
             Paragraph::new(Span::styled(
@@ -182,9 +206,11 @@ fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
             )),
             area,
         );
+        None
     } else {
         let lines = highlight_json_body(&app.request.body);
         frame.render_widget(Paragraph::new(lines), area);
+        None
     }
 }
 
@@ -231,117 +257,27 @@ fn method_color(method: &str) -> Color {
     }
 }
 
-/// Renders single-line text with cursor, scrolled horizontally to keep cursor visible
-fn render_text_with_cursor_scroll(text: &str, cursor_pos: usize, color: Color, width: usize) -> Line<'static> {
-    let pos = snap_to_char_boundary(text, cursor_pos);
-
+/// Scroll text horizontally, returns (visible_text, cursor_position_in_visible)
+fn scroll_text(text: &str, cursor_pos: usize, width: usize) -> (String, usize) {
     if text.len() <= width {
-        // Fits entirely — no scroll needed
-        return render_text_with_cursor(text, cursor_pos, color);
+        return (text.to_string(), cursor_pos);
     }
 
-    // Calculate visible window around cursor
     let half = width / 2;
-    let start = if pos > half { pos - half } else { 0 };
+    let start = cursor_pos.saturating_sub(half);
     let end = (start + width).min(text.len());
     let start = if end == text.len() && text.len() > width { text.len() - width } else { start };
 
-    // Snap start to char boundary
-    let start = snap_to_char_boundary(text, start);
-    let visible = &text[start..snap_to_char_boundary(text, end)];
-    let cursor_in_visible = pos - start;
-
-    render_text_with_cursor(visible, cursor_in_visible, color)
+    (text[start..end].to_string(), cursor_pos - start)
 }
 
-fn render_text_with_cursor(text: &str, cursor_pos: usize, color: Color) -> Line<'static> {
-    let pos = snap_to_char_boundary(text, cursor_pos);
-    let (before, after) = text.split_at(pos);
-
-    if after.is_empty() {
-        Line::from(vec![
-            Span::styled(before.to_string(), Style::default().fg(color)),
-            Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)),
-        ])
+/// Truncate text with ellipsis if too long
+fn truncate(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        text.to_string()
+    } else if max_len > 1 {
+        format!("{}…", &text[..max_len - 1])
     } else {
-        let ch = after.chars().next().unwrap();
-        let ch_len = ch.len_utf8();
-        Line::from(vec![
-            Span::styled(before.to_string(), Style::default().fg(color)),
-            Span::styled(after[..ch_len].to_string(), Style::default().fg(Color::Black).bg(Color::White)),
-            Span::styled(after[ch_len..].to_string(), Style::default().fg(color)),
-        ])
+        text[..max_len].to_string()
     }
-}
-
-fn render_kv_line_with_cursor(display: &str, cursor_pos: usize) -> Line<'static> {
-    let pos = snap_to_char_boundary(display, cursor_pos);
-    let (before, after) = display.split_at(pos);
-
-    let mut spans = vec![
-        Span::styled(" › ", Style::default().fg(Color::Cyan)),
-    ];
-
-    if after.is_empty() {
-        spans.push(Span::styled(before.to_string(), Style::default().fg(Color::White)));
-        spans.push(Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)));
-    } else {
-        let ch = after.chars().next().unwrap();
-        let ch_len = ch.len_utf8();
-        spans.push(Span::styled(before.to_string(), Style::default().fg(Color::White)));
-        spans.push(Span::styled(after[..ch_len].to_string(), Style::default().fg(Color::Black).bg(Color::White)));
-        spans.push(Span::styled(after[ch_len..].to_string(), Style::default().fg(Color::White)));
-    }
-
-    Line::from(spans)
-}
-
-fn render_multiline_with_cursor(text: &str, cursor_pos: usize) -> Vec<Line<'static>> {
-    let pos = snap_to_char_boundary(text, cursor_pos);
-    let before_cursor = &text[..pos];
-
-    let full_before_lines: Vec<&str> = before_cursor.split('\n').collect();
-    let cursor_line_idx = full_before_lines.len() - 1;
-    let cursor_col = full_before_lines.last().unwrap_or(&"").len();
-
-    let all_lines: Vec<&str> = text.split('\n').collect();
-    let mut result: Vec<Line<'static>> = Vec::new();
-
-    for (i, line_text) in all_lines.iter().enumerate() {
-        if i == cursor_line_idx {
-            let col = snap_to_char_boundary(line_text, cursor_col);
-            let (before, after) = line_text.split_at(col);
-
-            if after.is_empty() {
-                result.push(Line::from(vec![
-                    Span::styled(before.to_string(), Style::default().fg(Color::White)),
-                    Span::styled(" ".to_string(), Style::default().fg(Color::Black).bg(Color::White)),
-                ]));
-            } else {
-                let ch = after.chars().next().unwrap();
-                let ch_len = ch.len_utf8();
-                result.push(Line::from(vec![
-                    Span::styled(before.to_string(), Style::default().fg(Color::White)),
-                    Span::styled(after[..ch_len].to_string(), Style::default().fg(Color::Black).bg(Color::White)),
-                    Span::styled(after[ch_len..].to_string(), Style::default().fg(Color::White)),
-                ]));
-            }
-        } else {
-            result.push(Line::from(Span::styled(line_text.to_string(), Style::default().fg(Color::White))));
-        }
-    }
-
-    result
-}
-
-fn snap_to_char_boundary(s: &str, pos: usize) -> usize {
-    let pos = pos.min(s.len());
-    if s.is_char_boundary(pos) {
-        return pos;
-    }
-    let mut p = pos;
-    while p > 0 && !s.is_char_boundary(p) {
-        p -= 1;
-    }
-    p
 }
