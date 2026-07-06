@@ -10,22 +10,23 @@ use crate::storage::env::{self, Environment, interpolate};
 pub fn handle_events(
     app: &mut App,
     tx: &mpsc::Sender<(SavedRequest, Result<http::Response, String>)>,
+    client: &reqwest::Client,
 ) -> std::io::Result<()> {
-    if event::poll(std::time::Duration::from_millis(16))? {
+    if event::poll(std::time::Duration::from_millis(50))? {
         if let Event::Key(key) = event::read()? {
             if app.dialog.is_some() {
                 handle_dialog(app, key);
             } else if app.editing.is_some() {
                 handle_editing(app, key);
             } else {
-                handle_normal(app, key, tx);
+                handle_normal(app, key, tx, client);
             }
         }
     }
     Ok(())
 }
 
-fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<(SavedRequest, Result<http::Response, String>)>) {
+fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<(SavedRequest, Result<http::Response, String>)>, client: &reqwest::Client) {
     match (key.modifiers, key.code) {
         // Global
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.running = false,
@@ -43,8 +44,9 @@ fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<(SavedRequest, 
                 let interpolated = interpolate_request(&app.request, &app.environments);
                 let saved = SavedRequest::from_model("", &app.request);
                 let tx = tx.clone();
+                let client = client.clone();
                 tokio::spawn(async move {
-                    let result = http::send_request(&interpolated).await;
+                    let result = http::send_request(&interpolated, &client).await;
                     let _ = tx.send((saved, result)).await;
                 });
             }
@@ -446,18 +448,19 @@ fn handle_edit_env_vars(app: &mut App, key: KeyEvent) {
             app.cursor_pos = 0;
         }
         KeyCode::Left => {
-            if app.cursor_pos > 0 { app.cursor_pos -= 1; }
+            app.cursor_pos = prev_char_boundary(&inline, app.cursor_pos);
         }
         KeyCode::Right => {
-            if app.cursor_pos < inline.len() { app.cursor_pos += 1; }
+            app.cursor_pos = next_char_boundary(&inline, app.cursor_pos);
         }
         KeyCode::Home => app.cursor_pos = 0,
         KeyCode::End => app.cursor_pos = inline.len(),
         KeyCode::Backspace => {
             if app.cursor_pos > 0 {
-                let mut s = inline;
-                s.remove(app.cursor_pos - 1);
-                app.cursor_pos -= 1;
+                let prev = prev_char_boundary(&inline, app.cursor_pos);
+                let mut s = inline.clone();
+                s.replace_range(prev..app.cursor_pos, "");
+                app.cursor_pos = prev;
                 write_env_inline(app, &s);
             } else if inline.is_empty() || inline == "=" {
                 // Delete empty/separator-only row
@@ -475,15 +478,16 @@ fn handle_edit_env_vars(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Delete => {
             if app.cursor_pos < inline.len() {
+                let next = next_char_boundary(&inline, app.cursor_pos);
                 let mut s = inline;
-                s.remove(app.cursor_pos);
+                s.replace_range(app.cursor_pos..next, "");
                 write_env_inline(app, &s);
             }
         }
         KeyCode::Char(c) => {
             let mut s = inline;
             s.insert(app.cursor_pos, c);
-            app.cursor_pos += 1;
+            app.cursor_pos += c.len_utf8();
             write_env_inline(app, &s);
         }
         _ => {}
@@ -608,13 +612,13 @@ fn handle_body_edit(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Enter => {
             app.request.body.insert(app.cursor_pos, '\n');
-            app.cursor_pos += 1;
+            app.cursor_pos += '\n'.len_utf8();
         }
         KeyCode::Left => {
-            if app.cursor_pos > 0 { app.cursor_pos -= 1; }
+            app.cursor_pos = prev_char_boundary(&app.request.body, app.cursor_pos);
         }
         KeyCode::Right => {
-            if app.cursor_pos < app.request.body.len() { app.cursor_pos += 1; }
+            app.cursor_pos = next_char_boundary(&app.request.body, app.cursor_pos);
         }
         KeyCode::Up => {
             // Move cursor to same column on previous line
@@ -645,18 +649,20 @@ fn handle_body_edit(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Backspace => {
             if app.cursor_pos > 0 {
-                app.request.body.remove(app.cursor_pos - 1);
-                app.cursor_pos -= 1;
+                let prev = prev_char_boundary(&app.request.body, app.cursor_pos);
+                app.request.body.replace_range(prev..app.cursor_pos, "");
+                app.cursor_pos = prev;
             }
         }
         KeyCode::Delete => {
             if app.cursor_pos < app.request.body.len() {
-                app.request.body.remove(app.cursor_pos);
+                let next = next_char_boundary(&app.request.body, app.cursor_pos);
+                app.request.body.replace_range(app.cursor_pos..next, "");
             }
         }
         KeyCode::Char(c) => {
             app.request.body.insert(app.cursor_pos, c);
-            app.cursor_pos += 1;
+            app.cursor_pos += c.len_utf8();
         }
         _ => {}
     }
@@ -690,15 +696,14 @@ fn handle_text_edit(
     match key.code {
         KeyCode::Esc | KeyCode::Enter => app.editing = None,
         KeyCode::Left => {
-            if app.cursor_pos > 0 {
-                app.cursor_pos -= 1;
-            }
+            let pos = app.cursor_pos;
+            let field = get_field(app);
+            app.cursor_pos = prev_char_boundary(field, pos);
         }
         KeyCode::Right => {
-            let len = get_field(app).len();
-            if app.cursor_pos < len {
-                app.cursor_pos += 1;
-            }
+            let pos = app.cursor_pos;
+            let field = get_field(app);
+            app.cursor_pos = next_char_boundary(field, pos);
         }
         KeyCode::Home => app.cursor_pos = 0,
         KeyCode::End => {
@@ -707,21 +712,25 @@ fn handle_text_edit(
         KeyCode::Backspace => {
             if app.cursor_pos > 0 {
                 let pos = app.cursor_pos;
-                get_field(app).remove(pos - 1);
-                app.cursor_pos -= 1;
+                let field = get_field(app);
+                let prev = prev_char_boundary(field, pos);
+                get_field(app).replace_range(prev..pos, "");
+                app.cursor_pos = prev;
             }
         }
         KeyCode::Delete => {
             let pos = app.cursor_pos;
             let len = get_field(app).len();
             if pos < len {
-                get_field(app).remove(pos);
+                let field = get_field(app);
+                let next = next_char_boundary(field, pos);
+                get_field(app).replace_range(pos..next, "");
             }
         }
         KeyCode::Char(c) => {
             let pos = app.cursor_pos;
             get_field(app).insert(pos, c);
-            app.cursor_pos += 1;
+            app.cursor_pos += c.len_utf8();
         }
         _ => {}
     }
@@ -770,18 +779,19 @@ fn handle_kv_edit(app: &mut App, key: KeyEvent, is_headers: bool) {
             app.cursor_pos = 0;
         }
         KeyCode::Left => {
-            if app.cursor_pos > 0 { app.cursor_pos -= 1; }
+            app.cursor_pos = prev_char_boundary(&inline, app.cursor_pos);
         }
         KeyCode::Right => {
-            if app.cursor_pos < inline.len() { app.cursor_pos += 1; }
+            app.cursor_pos = next_char_boundary(&inline, app.cursor_pos);
         }
         KeyCode::Home => app.cursor_pos = 0,
         KeyCode::End => app.cursor_pos = inline.len(),
         KeyCode::Backspace => {
             if app.cursor_pos > 0 {
-                let mut s = inline;
-                s.remove(app.cursor_pos - 1);
-                app.cursor_pos -= 1;
+                let prev = prev_char_boundary(&inline, app.cursor_pos);
+                let mut s = inline.clone();
+                s.replace_range(prev..app.cursor_pos, "");
+                app.cursor_pos = prev;
                 write_inline(app, is_headers, sep, &s);
             } else if inline.is_empty() || inline == sep {
                 // Delete empty row
@@ -797,15 +807,16 @@ fn handle_kv_edit(app: &mut App, key: KeyEvent, is_headers: bool) {
         }
         KeyCode::Delete => {
             if app.cursor_pos < inline.len() {
+                let next = next_char_boundary(&inline, app.cursor_pos);
                 let mut s = inline;
-                s.remove(app.cursor_pos);
+                s.replace_range(app.cursor_pos..next, "");
                 write_inline(app, is_headers, sep, &s);
             }
         }
         KeyCode::Char(c) => {
             let mut s = inline;
             s.insert(app.cursor_pos, c);
-            app.cursor_pos += 1;
+            app.cursor_pos += c.len_utf8();
             write_inline(app, is_headers, sep, &s);
         }
         _ => {}
@@ -869,4 +880,28 @@ fn export_curl(req: &RequestModel) -> String {
     }
 
     parts.join(" \\\n  ")
+}
+
+/// Move cursor position back by one character (handles multi-byte)
+fn prev_char_boundary(s: &str, pos: usize) -> usize {
+    if pos == 0 {
+        return 0;
+    }
+    let mut p = pos - 1;
+    while p > 0 && !s.is_char_boundary(p) {
+        p -= 1;
+    }
+    p
+}
+
+/// Move cursor position forward by one character (handles multi-byte)
+fn next_char_boundary(s: &str, pos: usize) -> usize {
+    if pos >= s.len() {
+        return s.len();
+    }
+    let mut p = pos + 1;
+    while p < s.len() && !s.is_char_boundary(p) {
+        p += 1;
+    }
+    p
 }

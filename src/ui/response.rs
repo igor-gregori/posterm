@@ -123,8 +123,12 @@ fn draw_response(frame: &mut Frame, resp: &Response, area: Rect, scroll: usize) 
 }
 
 fn highlight_json(text: &str) -> Vec<Line<'static>> {
-    let ss = SyntaxSet::load_defaults_newlines();
-    let ts = ThemeSet::load_defaults();
+    use std::sync::OnceLock;
+    static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
+    static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
+
+    let ss = SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines);
+    let ts = THEME_SET.get_or_init(ThemeSet::load_defaults);
     let syntax = ss.find_syntax_by_extension("json").unwrap_or_else(|| ss.find_syntax_plain_text());
     let theme = &ts.themes["base16-ocean.dark"];
     let mut h = HighlightLines::new(syntax, theme);
@@ -132,7 +136,7 @@ fn highlight_json(text: &str) -> Vec<Line<'static>> {
     text.lines()
         .take(200) // cap lines for performance
         .map(|line| {
-            let spans: Vec<Span<'static>> = match h.highlight_line(line, &ss) {
+            let spans: Vec<Span<'static>> = match h.highlight_line(line, ss) {
                 Ok(ranges) => ranges
                     .into_iter()
                     .map(|(style, text)| {

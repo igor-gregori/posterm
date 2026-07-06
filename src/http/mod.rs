@@ -13,8 +13,7 @@ pub struct Response {
     pub duration: Duration,
 }
 
-pub async fn send_request(req: &RequestModel) -> Result<Response, String> {
-    let client = Client::new();
+pub async fn send_request(req: &RequestModel, client: &Client) -> Result<Response, String> {
     let url = build_url(req);
 
     let method = match req.method {
@@ -43,7 +42,14 @@ pub async fn send_request(req: &RequestModel) -> Result<Response, String> {
 
     let status = resp.status().as_u16();
     let status_text = resp.status().canonical_reason().unwrap_or("").to_string();
-    let body = resp.text().await.map_err(|e| format_error(&e))?;
+    let raw_body = resp.text().await.map_err(|e| format_error(&e))?;
+
+    // Pretty-print JSON if possible
+    let body = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw_body) {
+        serde_json::to_string_pretty(&json).unwrap_or(raw_body)
+    } else {
+        raw_body
+    };
 
     Ok(Response {
         status,

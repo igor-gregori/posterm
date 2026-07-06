@@ -11,6 +11,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use reqwest::Client;
 use tokio::sync::mpsc;
 
 use app::App;
@@ -24,6 +25,7 @@ async fn main() -> io::Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
 
     let mut app = App::new();
+    let client = Client::new();
 
     let (tx, mut rx) = mpsc::channel::<(SavedRequest, Result<http::Response, String>)>(1);
 
@@ -59,7 +61,7 @@ async fn main() -> io::Result<()> {
             app.response_scroll = 0;
         }
 
-        event::handle_events(&mut app, &tx)?;
+        event::handle_events(&mut app, &tx, &client)?;
     }
 
     disable_raw_mode()?;
