@@ -95,14 +95,28 @@ fn handle_normal(app: &mut App, key: KeyEvent, tx: &mpsc::Sender<(SavedRequest, 
             app.dialog = Some(Dialog::History);
         }
 
-        // Save request: Ctrl+S
+        // Save request: Ctrl+S (saves existing or opens Save As if new)
         (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
-            if !app.request.url.is_empty() && !app.collections.is_empty() {
-                app.dialog = Some(Dialog::SaveRequest);
-                app.dialog_input.clear();
-                app.cursor_pos = 0;
+            if !app.request.url.is_empty() {
+                if let (Some(ci), Some(ri)) = (app.active_collection_idx, app.active_request_idx) {
+                    // Save over existing request
+                    let name = app.collections[ci].requests[ri].name.clone();
+                    let saved = SavedRequest::from_model(&name, &app.request);
+                    app.collections[ci].requests[ri] = saved;
+                    let _ = collections::save_collection(&app.collections[ci]);
+                    app.status_message = Some("Request saved!".to_string());
+                    app.status_tick = app.tick;
+                } else if !app.collections.is_empty() {
+                    // New request — open Save As dialog
+                    app.dialog = Some(Dialog::SaveRequestAs);
+                    app.dialog_input.clear();
+                    app.cursor_pos = 0;
+                }
             }
         }
+
+        // Save As (new request): Ctrl+Shift not possible, use Ctrl+N for new request
+        // Ctrl+N already creates new collection, so let's keep Save As available via dialog
 
         // New collection: Ctrl+N
         (KeyModifiers::CONTROL, KeyCode::Char('n')) => {
@@ -235,6 +249,8 @@ fn handle_sidebar_enter(app: &mut App) {
         let saved = &app.collections[app.sidebar_collection].requests[ri];
         app.request = saved.to_model();
         app.response = None;
+        app.active_collection_idx = Some(app.sidebar_collection);
+        app.active_request_idx = Some(ri);
         app.active_panel = Panel::Request;
     } else {
         if app.sidebar_expanded == Some(app.sidebar_collection) {
@@ -249,11 +265,25 @@ fn handle_sidebar_delete(app: &mut App) {
     if app.collections.is_empty() {
         return;
     }
+    app.dialog = Some(Dialog::ConfirmDelete);
+}
+
+fn execute_delete(app: &mut App) {
+    if app.collections.is_empty() {
+        return;
+    }
 
     if let Some(ri) = app.sidebar_request {
         let col = &mut app.collections[app.sidebar_collection];
         col.requests.remove(ri);
         let _ = collections::save_collection(col);
+        // Clear active tracking if we deleted the active request
+        if app.active_collection_idx == Some(app.sidebar_collection)
+            && app.active_request_idx == Some(ri)
+        {
+            app.active_collection_idx = None;
+            app.active_request_idx = None;
+        }
         if ri > 0 {
             app.sidebar_request = Some(ri - 1);
         } else if col.requests.is_empty() {
@@ -267,6 +297,11 @@ fn handle_sidebar_delete(app: &mut App) {
             app.sidebar_collection = app.collections.len().saturating_sub(1);
         }
         app.sidebar_expanded = None;
+        // Clear active tracking if deleted collection contained active request
+        if app.active_collection_idx == Some(app.sidebar_collection) {
+            app.active_collection_idx = None;
+            app.active_request_idx = None;
+        }
     }
 }
 
@@ -276,6 +311,15 @@ fn handle_dialog(app: &mut App, key: KeyEvent) {
             match key.code {
                 KeyCode::Esc | KeyCode::F(1) => app.dialog = None,
                 _ => {}
+            }
+        }
+        Dialog::ConfirmDelete => {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    app.dialog = None;
+                    execute_delete(app);
+                }
+                _ => app.dialog = None,
             }
         }
         Dialog::CurlExport => {
@@ -429,27 +473,44 @@ fn handle_new_env(app: &mut App, key: KeyEvent) {
 
 fn handle_edit_env_vars(app: &mut App, key: KeyEvent) {
     let len = app.env_edit_vars.len();
-    let inline = format!("{}={}", app.env_edit_vars[app.env_edit_row].0, app.env_edit_vars[app.env_edit_row].1);
+    // Build inline: raw text (no separator if empty)
+    let inline = {
+        let (ref k, ref v) = app.env_edit_vars[app.env_edit_row];
+        if k.is_empty() && v.is_empty() {
+            String::new()
+        } else if v.is_empty() {
+            k.clone()
+        } else {
+            format!("{}={}", k, v)
+        }
+    };
+
+    // Clamp cursor
+    let cursor_pos = app.cursor_pos.min(inline.len());
+    app.cursor_pos = cursor_pos;
 
     match key.code {
         KeyCode::Esc => {
+            validate_env_row(app);
             save_env_vars(app);
             app.dialog = None;
         }
         KeyCode::Up if app.env_edit_row > 0 => {
-            sync_env_var_from_inline(app);
+            validate_env_row(app);
             app.env_edit_row -= 1;
-            let new_inline = format!("{}={}", app.env_edit_vars[app.env_edit_row].0, app.env_edit_vars[app.env_edit_row].1);
+            let (ref k, ref v) = app.env_edit_vars[app.env_edit_row];
+            let new_inline = if k.is_empty() && v.is_empty() { String::new() } else if v.is_empty() { k.clone() } else { format!("{}={}", k, v) };
             app.cursor_pos = new_inline.len();
         }
         KeyCode::Down if app.env_edit_row < len.saturating_sub(1) => {
-            sync_env_var_from_inline(app);
+            validate_env_row(app);
             app.env_edit_row += 1;
-            let new_inline = format!("{}={}", app.env_edit_vars[app.env_edit_row].0, app.env_edit_vars[app.env_edit_row].1);
+            let (ref k, ref v) = app.env_edit_vars[app.env_edit_row];
+            let new_inline = if k.is_empty() && v.is_empty() { String::new() } else if v.is_empty() { k.clone() } else { format!("{}={}", k, v) };
             app.cursor_pos = new_inline.len();
         }
         KeyCode::Enter => {
-            sync_env_var_from_inline(app);
+            validate_env_row(app);
             app.env_edit_vars.push((String::new(), String::new()));
             app.env_edit_row = app.env_edit_vars.len() - 1;
             app.cursor_pos = 0;
@@ -468,16 +529,15 @@ fn handle_edit_env_vars(app: &mut App, key: KeyEvent) {
                 let mut s = inline.clone();
                 s.replace_range(prev..app.cursor_pos, "");
                 app.cursor_pos = prev;
-                write_env_inline(app, &s);
+                write_env_raw(app, &s);
             } else if inline.is_empty() || inline == "=" {
-                // Delete empty/separator-only row
                 if app.env_edit_vars.len() > 1 {
                     app.env_edit_vars.remove(app.env_edit_row);
                     if app.env_edit_row > 0 { app.env_edit_row -= 1; }
-                    let new_inline = format!("{}={}", app.env_edit_vars[app.env_edit_row].0, app.env_edit_vars[app.env_edit_row].1);
+                    let (ref k, ref v) = app.env_edit_vars[app.env_edit_row];
+                    let new_inline = if k.is_empty() && v.is_empty() { String::new() } else if v.is_empty() { k.clone() } else { format!("{}={}", k, v) };
                     app.cursor_pos = new_inline.len();
                 } else {
-                    // Last row — clear it
                     app.env_edit_vars[0] = (String::new(), String::new());
                     app.cursor_pos = 0;
                 }
@@ -488,36 +548,39 @@ fn handle_edit_env_vars(app: &mut App, key: KeyEvent) {
                 let next = next_char_boundary(&inline, app.cursor_pos);
                 let mut s = inline;
                 s.replace_range(app.cursor_pos..next, "");
-                write_env_inline(app, &s);
+                write_env_raw(app, &s);
             }
         }
         KeyCode::Char(c) => {
             let mut s = inline;
             s.insert(app.cursor_pos, c);
             app.cursor_pos += c.len_utf8();
-            write_env_inline(app, &s);
+            write_env_raw(app, &s);
         }
         _ => {}
     }
 }
 
-fn sync_env_var_from_inline(app: &mut App) {
-    let row = app.env_edit_row;
-    let inline = format!("{}={}", app.env_edit_vars[row].0, app.env_edit_vars[row].1);
-    let (key, value) = split_env_kv(&inline);
-    app.env_edit_vars[row] = (key, value);
+/// Store raw text in env var (no split during editing)
+fn write_env_raw(app: &mut App, raw: &str) {
+    app.env_edit_vars[app.env_edit_row] = (raw.to_string(), String::new());
 }
 
-fn write_env_inline(app: &mut App, inline: &str) {
-    let (key, value) = split_env_kv(inline);
-    app.env_edit_vars[app.env_edit_row] = (key, value);
-}
-
-fn split_env_kv(s: &str) -> (String, String) {
-    if let Some(pos) = s.find('=') {
-        (s[..pos].to_string(), s[pos + 1..].to_string())
+/// Validate and split current env row on '='
+fn validate_env_row(app: &mut App) {
+    let (ref k, ref v) = app.env_edit_vars[app.env_edit_row];
+    let raw = if k.is_empty() && v.is_empty() {
+        return;
+    } else if v.is_empty() {
+        k.clone()
     } else {
-        (s.to_string(), String::new())
+        format!("{}={}", k, v)
+    };
+
+    if let Some(pos) = raw.find('=') {
+        app.env_edit_vars[app.env_edit_row] = (raw[..pos].to_string(), raw[pos + 1..].to_string());
+    } else {
+        app.env_edit_vars[app.env_edit_row] = (raw, String::new());
     }
 }
 
@@ -547,11 +610,17 @@ fn handle_text_dialog(app: &mut App, key: KeyEvent) {
             let input = app.dialog_input.trim().to_string();
             if !input.is_empty() {
                 match app.dialog.unwrap() {
-                    Dialog::SaveRequest => {
+                    Dialog::SaveRequestAs => {
                         let saved = SavedRequest::from_model(&input, &app.request);
                         let col = &mut app.collections[app.sidebar_collection];
                         col.requests.push(saved);
+                        let ri = col.requests.len() - 1;
                         let _ = collections::save_collection(col);
+                        // Track as active
+                        app.active_collection_idx = Some(app.sidebar_collection);
+                        app.active_request_idx = Some(ri);
+                        app.status_message = Some("Request created!".to_string());
+                        app.status_tick = app.tick;
                     }
                     Dialog::NewCollection => {
                         let col = Collection {

@@ -51,7 +51,8 @@ pub enum EditingField {
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Dialog {
-    SaveRequest,
+    SaveRequestAs,
+    ConfirmDelete,
     NewCollection,
     SelectEnv,
     NewEnv,
@@ -86,6 +87,9 @@ pub struct App {
     pub sidebar_collection: usize,
     pub sidebar_request: Option<usize>,
     pub sidebar_expanded: Option<usize>,
+    // Active request tracking (which collection/request is currently loaded)
+    pub active_collection_idx: Option<usize>,
+    pub active_request_idx: Option<usize>,
     // History
     pub history: History,
     pub history_selection: usize,
@@ -126,6 +130,8 @@ impl App {
             sidebar_collection: 0,
             sidebar_request: None,
             sidebar_expanded: None,
+            active_collection_idx: None,
+            active_request_idx: None,
             history,
             history_selection: 0,
             dialog: None,

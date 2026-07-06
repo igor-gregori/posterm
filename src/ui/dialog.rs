@@ -14,8 +14,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     };
 
     match dialog {
-        Dialog::SaveRequest | Dialog::NewCollection | Dialog::NewEnv => {
+        Dialog::SaveRequestAs | Dialog::NewCollection | Dialog::NewEnv => {
             draw_text_input(frame, app, *dialog);
+        }
+        Dialog::ConfirmDelete => {
+            draw_confirm_delete(frame, app);
         }
         Dialog::SelectEnv => {
             draw_select_env(frame, app);
@@ -40,7 +43,7 @@ fn draw_text_input(frame: &mut Frame, app: &App, dialog: Dialog) {
     frame.render_widget(Clear, area);
 
     let title = match dialog {
-        Dialog::SaveRequest => " Save Request ",
+        Dialog::SaveRequestAs => " Save Request ",
         Dialog::NewCollection => " New Collection ",
         Dialog::NewEnv => " New Environment ",
         _ => "",
@@ -158,7 +161,13 @@ fn draw_edit_env_vars(frame: &mut Frame, app: &App) {
 
     for (i, (key, value)) in app.env_edit_vars.iter().enumerate() {
         let is_active_row = i == app.env_edit_row;
-        let display = format!("{}={}", key, value);
+        let display = if key.is_empty() && value.is_empty() {
+            String::new()
+        } else if value.is_empty() {
+            key.clone()
+        } else {
+            format!("{}={}", key, value)
+        };
         let row_marker = if is_active_row { "› " } else { "  " };
 
         if is_active_row {
@@ -167,9 +176,8 @@ fn draw_edit_env_vars(frame: &mut Frame, app: &App) {
                 Span::styled(row_marker.to_string(), Style::default().fg(Color::Cyan)),
                 Span::styled(display.clone(), Style::default().fg(Color::White)),
             ]));
-            // cursor: inner.x + 2 (marker) + pos
             cursor_xy = Some((inner.x + 2 + pos as u16, inner.y + i as u16));
-        } else if display == "=" {
+        } else if display.is_empty() {
             lines.push(Line::from(vec![
                 Span::styled(row_marker.to_string(), Style::default().fg(Color::Cyan)),
                 Span::styled("key=value".to_string(), Style::default().fg(Color::DarkGray)),
@@ -189,6 +197,37 @@ fn draw_edit_env_vars(frame: &mut Frame, app: &App) {
     if let Some((x, y)) = cursor_xy {
         frame.set_cursor_position(ratatui::layout::Position { x, y });
     }
+}
+
+fn draw_confirm_delete(frame: &mut Frame, app: &App) {
+    let area = centered_rect(45, 5, frame.area());
+    frame.render_widget(Clear, area);
+
+    let item_name = if let Some(ri) = app.sidebar_request {
+        &app.collections[app.sidebar_collection].requests[ri].name
+    } else {
+        &app.collections[app.sidebar_collection].name
+    };
+
+    let block = Block::default()
+        .title(" Confirm Delete ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let lines = vec![
+        Line::from(Span::styled(
+            format!(" Delete \"{}\"?", item_name),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(Span::styled(
+            " y/Enter: confirm │ any other key: cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_curl_export(frame: &mut Frame, app: &App) {
